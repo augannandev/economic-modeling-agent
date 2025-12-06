@@ -1,0 +1,82 @@
+# Dependencies
+node_modules/
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+data/postgres/
+*.db
+*.sqlite
+
+# Logs
+*.log
+server.log
+python-service.log
+r_service.log
+firebase-debug.log
+
+# Temporary files
+*.tmp
+*.temp
+test_output.txt
+test_write.txt
+
+# Generated plots (keep structure, ignore generated images)
+*.png
+*.jpg
+*.jpeg
+*.pdf
+!public/**/*.png
+!public/**/*.jpg
+!public/**/*.svg
+
+# Python
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+# Data files (large parquet files - exclude or use Git LFS)
+# PseuodoIPD/*.parquet
+
+# Lock files (optional - some teams prefer to commit these)
+# pnpm-lock.yaml
+# package-lock.json
+
