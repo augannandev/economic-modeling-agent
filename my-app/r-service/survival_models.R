@@ -9,7 +9,7 @@ library(jsonlite)
 #* Health check endpoint
 #* @get /
 #* @serializer json
-function() {
+health_check <- function() {
   list(
     message = "R Survival Analysis Service",
     status = "running",
@@ -175,8 +175,7 @@ get_schoenfeld_residuals <- function(req) {
     time <- body$time
     event <- body$event
     arm <- body$arm # 0/1 or categorical
-  
-  tryCatch({
+    
     # Create data frame
     df <- data.frame(time = time, event = event, arm = arm)
     
@@ -200,7 +199,7 @@ get_schoenfeld_residuals <- function(req) {
     # Get the p-value from the table
     p_value <- as.numeric(zph$table["arm", "p"])
     chisq <- as.numeric(zph$table["arm", "chisq"])
-    df <- as.numeric(zph$table["arm", "df"])
+    df_val <- as.numeric(zph$table["arm", "df"])
     
     # Calculate smoothed trend and confidence intervals
     # Use loess smoothing similar to plot.cox.zph
@@ -236,7 +235,7 @@ get_schoenfeld_residuals <- function(req) {
       ci_upper = as.numeric(ci_upper),
       p_value = p_value,
       chisq = chisq,
-      df = df
+      df = df_val
     )
     
     return(result)
@@ -247,10 +246,5 @@ get_schoenfeld_residuals <- function(req) {
       error_msg <- paste(error_msg, "\nCall:", deparse(e$call))
     }
     return(list(error = error_msg))
-  })
-  
-  }, error = function(e) {
-    # Outer error handler for JSON parsing
-    return(list(error = paste("Error parsing request:", e$message)))
   })
 }
