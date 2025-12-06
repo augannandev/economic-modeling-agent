@@ -39,6 +39,13 @@ RUN Rscript -e "cat('Verifying packages...\n'); \
 # Copy application code
 COPY . .
 
+# Final verification that packages are available before copying code
+RUN Rscript -e "cat('Final package check...\n'); \
+    library(plumber); \
+    library(survival); \
+    library(jsonlite); \
+    cat('✓ All packages loaded successfully\n')"
+
 # Expose port
 EXPOSE 8001
 
