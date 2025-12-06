@@ -1,7 +1,7 @@
 import { getAuth } from 'firebase/auth';
 import { app } from './firebase';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5500';
 
 // Functional error type instead of class
 interface APIError extends Error {

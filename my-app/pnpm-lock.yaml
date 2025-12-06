@@ -91,6 +91,9 @@ importers:
       '@types/fs-extra':
         specifier: ^11.0.4
         version: 11.0.4
+      '@types/node':
+        specifier: ^22.15.21
+        version: 22.15.21
       dotenv-cli:
         specifier: ^7.3.0
         version: 7.4.4
