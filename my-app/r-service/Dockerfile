@@ -10,41 +10,49 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install R packages - use faster method without all dependencies
-# Install plumber with minimal dependencies first (faster)
+# Install R packages with explicit error checking
+# Install plumber - check if installation actually succeeded
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    options(timeout = 300); \
+    options(timeout = 600); \
     cat('Installing plumber (this may take a few minutes)...\n'); \
-    install.packages('plumber', repos='https://cloud.r-project.org', dependencies = c('Depends', 'Imports')); \
-    cat('✓ plumber installed\n')"
+    result <- tryCatch({ \
+        install.packages('plumber', repos='https://cloud.r-project.org', dependencies = c('Depends', 'Imports'), quiet = FALSE); \
+        TRUE \
+    }, error = function(e) { \
+        cat('ERROR installing plumber:', e$message, '\n'); \
+        FALSE \
+    }); \
+    if (!result) stop('plumber installation failed'); \
+    if (!'plumber' %in% rownames(installed.packages())) stop('plumber not found after installation'); \
+    cat('✓ plumber installed and verified\n')"
 
-# Install survival (usually fast)
+# Install survival
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    install.packages('survival', repos='https://cloud.r-project.org'); \
+    cat('Installing survival...\n'); \
+    install.packages('survival', repos='https://cloud.r-project.org', quiet = FALSE); \
+    if (!'survival' %in% rownames(installed.packages())) stop('survival installation failed'); \
     cat('✓ survival installed\n')"
 
-# Install jsonlite (usually fast)
+# Install jsonlite
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    install.packages('jsonlite', repos='https://cloud.r-project.org'); \
+    cat('Installing jsonlite...\n'); \
+    install.packages('jsonlite', repos='https://cloud.r-project.org', quiet = FALSE); \
+    if (!'jsonlite' %in% rownames(installed.packages())) stop('jsonlite installation failed'); \
     cat('✓ jsonlite installed\n')"
-
-# Quick verification (don't load, just check if installed)
-RUN Rscript -e "cat('Verifying packages...\n'); \
-    pkgs <- c('plumber', 'survival', 'jsonlite'); \
-    installed <- rownames(installed.packages()); \
-    missing <- pkgs[!pkgs %in% installed]; \
-    if (length(missing) > 0) stop(paste('Missing packages:', paste(missing, collapse=', '))); \
-    cat('✓ All packages verified\n')"
 
 # Copy application code
 COPY . .
 
-# Final verification that packages are available before copying code
-RUN Rscript -e "cat('Final package check...\n'); \
-    library(plumber); \
-    library(survival); \
-    library(jsonlite); \
-    cat('✓ All packages loaded successfully\n')"
+# Final verification - try to load packages
+RUN Rscript -e "cat('Final package verification...\n'); \
+    pkgs <- c('plumber', 'survival', 'jsonlite'); \
+    installed <- rownames(installed.packages()); \
+    missing <- pkgs[!pkgs %in% installed]; \
+    if (length(missing) > 0) { \
+        cat('Installed packages:', paste(installed, collapse=', '), '\n'); \
+        stop(paste('Missing packages:', paste(missing, collapse=', '))); \
+    }; \
+    cat('✓ All packages verified\n')"
 
 # Expose port
 EXPOSE 8001
