@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "build": "tsc --skipLibCheck",
     "deploy": "npm run deploy:cf",
     "deploy:cf": "node scripts/deploy-cloudflare.js",
     "test": "vitest",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240208.0",
     "@types/fs-extra": "^11.0.4",
+    "@types/node": "^22.15.21",
     "dotenv-cli": "^7.3.0",
     "drizzle-kit": "^0.20.14",
     "tsx": "^4.7.0",
