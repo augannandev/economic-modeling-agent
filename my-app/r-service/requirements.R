@@ -1,10 +1,15 @@
-# R Package Dependencies
-# Install with: Rscript -e "install.packages(c('plumber', 'survival', 'flexsurv', 'rstpm2', 'jsonlite'))"
+# R package requirements for Railway deployment
+# This file is used by Railway's Nixpacks builder if Dockerfile isn't used
 
-# Required packages:
-# - plumber: API framework
-# - survival: Core survival analysis
-# - flexsurv: Flexible parametric survival models (includes Gompertz)
-# - rstpm2: Royston-Parmar flexible parametric splines
-# - jsonlite: JSON serialization
+# Set CRAN repository
+options(repos = c(CRAN = 'https://cloud.r-project.org'))
 
+# Install required packages
+install.packages(c('plumber', 'survival', 'jsonlite'), dependencies = TRUE)
+
+# Optional packages (may fail, but that's OK)
+tryCatch({
+  install.packages('flexsurv', dependencies = TRUE)
+}, error = function(e) {
+  cat('Note: flexsurv installation failed (optional package)\n')
+})
