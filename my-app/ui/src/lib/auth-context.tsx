@@ -7,6 +7,33 @@ import { getCurrentUser } from './serverComm'
 // Constants
 const LOGOUT_RESET_DELAY_MS = 1000;
 
+// Check if we're in demo mode (no real Firebase config)
+const isDemoMode = () => {
+  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
+  return !projectId || projectId === 'demo-project';
+};
+
+// Create a mock user for demo mode
+const createDemoUser = (): User => ({
+  uid: 'demo-user-123',
+  email: 'demo@example.com',
+  displayName: 'Demo User',
+  isAnonymous: false,
+  emailVerified: true,
+  photoURL: null,
+  phoneNumber: null,
+  providerId: 'demo',
+  metadata: {} as any,
+  providerData: [],
+  refreshToken: '',
+  tenantId: null,
+  delete: async () => {},
+  getIdToken: async () => 'demo-token',
+  getIdTokenResult: async () => ({ token: 'demo-token' } as any),
+  reload: async () => {},
+  toJSON: () => ({}),
+} as User);
+
 // User profile from our backend
 interface UserProfile {
   id: string
@@ -51,6 +78,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         setLoading(true);
 
+        // If in demo mode, use mock user immediately
+        if (isDemoMode()) {
+          console.log('🎭 Running in demo mode - Firebase not configured');
+          if (isActive) {
+            setUser(createDemoUser());
+            setUserProfile(null);
+            setLoading(false);
+            setProfileLoading(false);
+          }
+          return () => {}; // Return empty cleanup function
+        }
+
         // Set up Firebase auth listener
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
           // If this effect has been cleaned up, ignore the callback
@@ -72,6 +111,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               } catch (error) {
                 console.error('Failed to create anonymous user:', error);
                 if (isActive) {
+                  // Fall back to demo mode if Firebase fails
+                  console.log('🎭 Falling back to demo mode');
+                  setUser(createDemoUser());
                   setUserProfile(null);
                   setProfileLoading(false);
                 }
@@ -114,6 +156,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         console.error('Auth initialization error:', error);
         if (isActive) {
+          // Fall back to demo mode on any error
+          console.log('🎭 Falling back to demo mode due to error');
+          setUser(createDemoUser());
           setLoading(false);
           setProfileLoading(false);
         }

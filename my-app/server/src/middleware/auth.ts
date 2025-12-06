@@ -11,6 +11,22 @@ declare module 'hono' {
   }
 }
 
+// Check if we're in demo mode (no real Firebase config)
+const isDemoMode = () => {
+  const projectId = getFirebaseProjectId();
+  return !projectId || projectId === 'demo-project';
+};
+
+// Demo user for testing without Firebase
+const DEMO_USER: User = {
+  id: 'demo-user-123',
+  email: 'demo@example.com',
+  display_name: 'Demo User',
+  photo_url: null,
+  created_at: new Date(),
+  updated_at: new Date(),
+};
+
 export const authMiddleware: MiddlewareHandler = async (c, next) => {
   try {
     const authHeader = c.req.header('Authorization');
@@ -19,6 +35,15 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
     }
 
     const token = authHeader.split('Bearer ')[1];
+    
+    // Handle demo mode - accept demo token
+    if (isDemoMode() || token === 'demo-token-for-testing') {
+      console.log('🎭 Demo mode: using demo user');
+      c.set('user', DEMO_USER);
+      await next();
+      return;
+    }
+    
     const firebaseProjectId = getFirebaseProjectId();
     const firebaseUser = await verifyFirebaseToken(token, firebaseProjectId);
     

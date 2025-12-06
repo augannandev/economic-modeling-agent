@@ -3,6 +3,12 @@ import { app } from './firebase';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5500';
 
+// Check if we're in demo mode (no real Firebase config)
+const isDemoMode = () => {
+  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
+  return !projectId || projectId === 'demo-project';
+};
+
 // Functional error type instead of class
 interface APIError extends Error {
   status: number;
@@ -20,6 +26,11 @@ function createAPIError(status: number, message: string, code?: string, user_id?
 }
 
 async function getAuthToken(): Promise<string | null> {
+  // In demo mode, return a demo token
+  if (isDemoMode()) {
+    return 'demo-token-for-testing';
+  }
+  
   const auth = getAuth(app);
   const user = auth.currentUser;
   if (!user) {
