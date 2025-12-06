@@ -9,7 +9,8 @@ RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+# Use --no-frozen-lockfile in Railway to allow lockfile updates if needed
+RUN pnpm install --no-frozen-lockfile
 
 # Copy source code
 COPY . .
