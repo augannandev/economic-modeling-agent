@@ -1,0 +1,16 @@
+# Files to ignore when deploying to Railway
+node_modules/
+venv/
+__pycache__/
+*.pyc
+*.log
+.env
+.env.local
+dist/
+build/
+data/postgres/
+*.png
+*.jpg
+*.pdf
+.DS_Store
+

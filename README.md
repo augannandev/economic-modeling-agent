@@ -38,7 +38,27 @@ The system consists of three main services:
 - Displays model fits, plots, and LLM assessments
 - Interactive model comparison and selection
 
-## 🚀 Quick Start
+## 🚀 Deployment
+
+### Quick Deploy to Production
+
+Deploy the system to production using:
+- **Vercel** for the React frontend
+- **Railway** for backend services (API, Python, R, PostgreSQL)
+
+See [DEPLOYMENT.md](./my-app/DEPLOYMENT.md) for detailed instructions or [DEPLOYMENT_QUICKSTART.md](./my-app/DEPLOYMENT_QUICKSTART.md) for a quick start guide.
+
+### Deployment Architecture
+
+```
+Frontend (Vercel) → Backend API (Railway) → Python Service (Railway)
+                                      ↓
+                              R Service (Railway)
+                                      ↓
+                              PostgreSQL (Railway)
+```
+
+## 🚀 Quick Start (Local Development)
 
 ### Prerequisites
 

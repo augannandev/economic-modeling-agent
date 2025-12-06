@@ -16,7 +16,10 @@ if (length(script_path) > 0) {
 # Load the Plumber API directly from survival_models.R (which has all endpoints)
 pr <- plumber::plumb("survival_models.R")
 
+# Get port from environment variable (Railway) or use default
+port <- as.integer(Sys.getenv("PORT", "8001"))
+
 # Run the service
-cat("Starting R Survival Analysis Service on port 8001...\n")
-pr$run(port = 8001, host = "0.0.0.0")
+cat(sprintf("Starting R Survival Analysis Service on port %d...\n", port))
+pr$run(port = port, host = "0.0.0.0")
 

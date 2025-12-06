@@ -13,7 +13,8 @@ const parseCliArgs = () => {
   };
 };
 
-const { port } = parseCliArgs();
+// Use PORT from environment (Railway/Vercel) or CLI args, fallback to default
+const port = parseInt(process.env.PORT || parseCliArgs().port.toString());
 
 // Extract PostgreSQL port from DATABASE_URL if it's a local embedded postgres connection
 const getPostgresPortFromDatabaseUrl = (): number => {
