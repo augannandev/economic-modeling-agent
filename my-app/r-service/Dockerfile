@@ -2,11 +2,12 @@ FROM r-base:4.3.0
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (including libsodium-dev for plumber dependency)
 RUN apt-get update && apt-get install -y \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
+    libsodium-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
