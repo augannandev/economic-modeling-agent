@@ -10,21 +10,20 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install R packages with error handling
-RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    install.packages(c('plumber', 'survival', 'jsonlite'), dependencies = TRUE)" || \
-    Rscript -e "install.packages('plumber', repos='https://cloud.r-project.org', dependencies=TRUE)" && \
-    Rscript -e "install.packages('survival', repos='https://cloud.r-project.org', dependencies=TRUE)" && \
-    Rscript -e "install.packages('jsonlite', repos='https://cloud.r-project.org', dependencies=TRUE)"
+# Install R packages - install plumber first (most critical)
+RUN Rscript -e "install.packages('plumber', repos='https://cloud.r-project.org', dependencies=TRUE)"
 
-# Try to install optional packages (may fail, but that's OK)
-RUN Rscript -e "install.packages('flexsurv', repos='https://cloud.r-project.org', dependencies=TRUE)" || echo "flexsurv installation failed, continuing..."
-RUN Rscript -e "if (!require('BiocManager', quietly = TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org'); \
-    BiocManager::install('rstpm2', update=FALSE, ask=FALSE)" || echo "rstpm2 installation failed, continuing..."
+# Install other required packages
+RUN Rscript -e "install.packages(c('survival', 'jsonlite'), repos='https://cloud.r-project.org', dependencies=TRUE)"
 
-# Verify plumber is installed
-RUN Rscript -e "if (!require('plumber', quietly = TRUE)) stop('plumber package not installed')" && \
-    echo "✓ plumber package verified"
+# Install optional packages (non-blocking)
+RUN Rscript -e "tryCatch(install.packages('flexsurv', repos='https://cloud.r-project.org', dependencies=TRUE), error=function(e) cat('flexsurv failed:', e$message, '\n'))" || true
+
+# Verify critical packages are installed
+RUN Rscript -e "if (!require('plumber', quietly = TRUE)) stop('plumber not installed'); \
+    if (!require('survival', quietly = TRUE)) stop('survival not installed'); \
+    if (!require('jsonlite', quietly = TRUE)) stop('jsonlite not installed'); \
+    cat('✓ All required packages installed\n')"
 
 # Copy application code
 COPY . .
