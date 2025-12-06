@@ -10,20 +10,31 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install R packages - install plumber first (most critical)
-RUN Rscript -e "install.packages('plumber', repos='https://cloud.r-project.org', dependencies=TRUE)"
+# Set CRAN mirror and install R packages with explicit error checking
+RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    cat('Installing plumber...\n'); \
+    install.packages('plumber', repos='https://cloud.r-project.org', dependencies=TRUE); \
+    if (!require('plumber', quietly = TRUE)) stop('plumber installation failed'); \
+    cat('✓ plumber installed\n')"
 
-# Install other required packages
-RUN Rscript -e "install.packages(c('survival', 'jsonlite'), repos='https://cloud.r-project.org', dependencies=TRUE)"
+RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    cat('Installing survival...\n'); \
+    install.packages('survival', repos='https://cloud.r-project.org', dependencies=TRUE); \
+    if (!require('survival', quietly = TRUE)) stop('survival installation failed'); \
+    cat('✓ survival installed\n')"
 
-# Install optional packages (non-blocking)
-RUN Rscript -e "tryCatch(install.packages('flexsurv', repos='https://cloud.r-project.org', dependencies=TRUE), error=function(e) cat('flexsurv failed:', e$message, '\n'))" || true
+RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    cat('Installing jsonlite...\n'); \
+    install.packages('jsonlite', repos='https://cloud.r-project.org', dependencies=TRUE); \
+    if (!require('jsonlite', quietly = TRUE)) stop('jsonlite installation failed'); \
+    cat('✓ jsonlite installed\n')"
 
-# Verify critical packages are installed
-RUN Rscript -e "if (!require('plumber', quietly = TRUE)) stop('plumber not installed'); \
-    if (!require('survival', quietly = TRUE)) stop('survival not installed'); \
-    if (!require('jsonlite', quietly = TRUE)) stop('jsonlite not installed'); \
-    cat('✓ All required packages installed\n')"
+# Verify all packages are available
+RUN Rscript -e "cat('Verifying packages...\n'); \
+    if (!require('plumber', quietly = TRUE)) stop('plumber not available'); \
+    if (!require('survival', quietly = TRUE)) stop('survival not available'); \
+    if (!require('jsonlite', quietly = TRUE)) stop('jsonlite not available'); \
+    cat('✓ All packages verified\n')"
 
 # Copy application code
 COPY . .
