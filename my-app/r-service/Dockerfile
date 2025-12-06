@@ -49,12 +49,20 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'flexsurv' %in% rownames(installed.packages())) stop('flexsurv installation failed'); \
     cat('✓ flexsurv installed\n')"
 
+# Install rstpm2 (required by survival_models.R for Royston-Parmar splines)
+RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    options(timeout = 600); \
+    cat('Installing rstpm2 (this may take a few minutes)...\n'); \
+    install.packages('rstpm2', repos='https://cloud.r-project.org', quiet = FALSE); \
+    if (!'rstpm2' %in% rownames(installed.packages())) stop('rstpm2 installation failed'); \
+    cat('✓ rstpm2 installed\n')"
+
 # Copy application code
 COPY . .
 
 # Final verification - try to load packages
 RUN Rscript -e "cat('Final package verification...\n'); \
-    pkgs <- c('plumber', 'survival', 'jsonlite', 'flexsurv'); \
+    pkgs <- c('plumber', 'survival', 'jsonlite', 'flexsurv', 'rstpm2'); \
     installed <- rownames(installed.packages()); \
     missing <- pkgs[!pkgs %in% installed]; \
     if (length(missing) > 0) { \
