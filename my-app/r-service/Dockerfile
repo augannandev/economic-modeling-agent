@@ -41,12 +41,20 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'jsonlite' %in% rownames(installed.packages())) stop('jsonlite installation failed'); \
     cat('✓ jsonlite installed\n')"
 
+# Install flexsurv (required by survival_models.R)
+RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    options(timeout = 600); \
+    cat('Installing flexsurv (this may take a few minutes)...\n'); \
+    install.packages('flexsurv', repos='https://cloud.r-project.org', quiet = FALSE); \
+    if (!'flexsurv' %in% rownames(installed.packages())) stop('flexsurv installation failed'); \
+    cat('✓ flexsurv installed\n')"
+
 # Copy application code
 COPY . .
 
 # Final verification - try to load packages
 RUN Rscript -e "cat('Final package verification...\n'); \
-    pkgs <- c('plumber', 'survival', 'jsonlite'); \
+    pkgs <- c('plumber', 'survival', 'jsonlite', 'flexsurv'); \
     installed <- rownames(installed.packages()); \
     missing <- pkgs[!pkgs %in% installed]; \
     if (length(missing) > 0) { \
