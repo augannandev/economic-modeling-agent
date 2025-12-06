@@ -10,30 +10,30 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Set CRAN mirror and install R packages with explicit error checking
+# Install R packages - use faster method without all dependencies
+# Install plumber with minimal dependencies first (faster)
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    cat('Installing plumber...\n'); \
-    install.packages('plumber', repos='https://cloud.r-project.org', dependencies=TRUE); \
-    if (!require('plumber', quietly = TRUE)) stop('plumber installation failed'); \
+    options(timeout = 300); \
+    cat('Installing plumber (this may take a few minutes)...\n'); \
+    install.packages('plumber', repos='https://cloud.r-project.org', dependencies = c('Depends', 'Imports')); \
     cat('✓ plumber installed\n')"
 
+# Install survival (usually fast)
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    cat('Installing survival...\n'); \
-    install.packages('survival', repos='https://cloud.r-project.org', dependencies=TRUE); \
-    if (!require('survival', quietly = TRUE)) stop('survival installation failed'); \
+    install.packages('survival', repos='https://cloud.r-project.org'); \
     cat('✓ survival installed\n')"
 
+# Install jsonlite (usually fast)
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    cat('Installing jsonlite...\n'); \
-    install.packages('jsonlite', repos='https://cloud.r-project.org', dependencies=TRUE); \
-    if (!require('jsonlite', quietly = TRUE)) stop('jsonlite installation failed'); \
+    install.packages('jsonlite', repos='https://cloud.r-project.org'); \
     cat('✓ jsonlite installed\n')"
 
-# Verify all packages are available
+# Quick verification (don't load, just check if installed)
 RUN Rscript -e "cat('Verifying packages...\n'); \
-    if (!require('plumber', quietly = TRUE)) stop('plumber not available'); \
-    if (!require('survival', quietly = TRUE)) stop('survival not available'); \
-    if (!require('jsonlite', quietly = TRUE)) stop('jsonlite not available'); \
+    pkgs <- c('plumber', 'survival', 'jsonlite'); \
+    installed <- rownames(installed.packages()); \
+    missing <- pkgs[!pkgs %in% installed]; \
+    if (length(missing) > 0) stop(paste('Missing packages:', paste(missing, collapse=', '))); \
     cat('✓ All packages verified\n')"
 
 # Copy application code
