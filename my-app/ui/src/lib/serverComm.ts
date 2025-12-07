@@ -1,11 +1,26 @@
 import { getAuth } from 'firebase/auth';
 import { app } from './firebase';
 
-// Use VITE_API_URL in production, localhost in development
-const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
-    ? 'http://localhost:5500' 
-    : '');
+// API URL - must be set via VITE_API_URL in production
+const getApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl) {
+    console.log('[API] Using VITE_API_URL:', envUrl);
+    return envUrl;
+  }
+  
+  // Fallback for local development only
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    console.log('[API] Using localhost fallback');
+    return 'http://localhost:5500';
+  }
+  
+  // Production without VITE_API_URL - this shouldn't happen
+  console.warn('[API] WARNING: VITE_API_URL not set in production!');
+  return '';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Check if we're in demo mode (anonymous users allowed or no real Firebase config)
 const isDemoMode = () => {

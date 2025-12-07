@@ -1,10 +1,16 @@
 import { fetchWithAuth } from './serverComm';
 
-// Use relative URLs in production, localhost in development
+// API URL for plots (direct URLs, not through fetchWithAuth)
 const API_BASE_URL = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
     ? 'http://localhost:5500' 
     : '');
+
+// Log the API URL at startup for debugging
+if (typeof window !== 'undefined') {
+  console.log('[SurvivalAPI] API_BASE_URL:', API_BASE_URL || '(empty - using relative URLs)');
+  console.log('[SurvivalAPI] VITE_API_URL env:', import.meta.env.VITE_API_URL || '(not set)');
+}
 
 export interface Analysis {
   id: string;
