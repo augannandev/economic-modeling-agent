@@ -40,7 +40,11 @@ function AppContent() {
   }
 
   // Determine if login form should be shown
-  const allowAnonymous = import.meta.env.VITE_ALLOW_ANONYMOUS_USERS !== 'false';
+  // Check for 'true'/'TRUE' explicitly, or fallback to demo mode check
+  const allowAnonymousEnv = import.meta.env.VITE_ALLOW_ANONYMOUS_USERS;
+  const allowAnonymous = allowAnonymousEnv 
+    ? allowAnonymousEnv.toLowerCase() === 'true' 
+    : import.meta.env.VITE_FIREBASE_PROJECT_ID === 'demo-project' || !import.meta.env.VITE_FIREBASE_PROJECT_ID;
   
   let shouldShowLogin: boolean;
   if (allowAnonymous) {

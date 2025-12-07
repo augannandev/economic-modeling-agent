@@ -7,8 +7,15 @@ import { getCurrentUser } from './serverComm'
 // Constants
 const LOGOUT_RESET_DELAY_MS = 1000;
 
-// Check if we're in demo mode (no real Firebase config)
+// Check if we're in demo mode (no real Firebase config OR anonymous users explicitly allowed)
 const isDemoMode = () => {
+  // If VITE_ALLOW_ANONYMOUS_USERS is explicitly set to 'true' or 'TRUE', use demo mode
+  const allowAnonymous = import.meta.env.VITE_ALLOW_ANONYMOUS_USERS;
+  if (allowAnonymous && allowAnonymous.toLowerCase() === 'true') {
+    return true;
+  }
+  
+  // Also check if Firebase project ID is not configured
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
   return !projectId || projectId === 'demo-project';
 };
