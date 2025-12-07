@@ -29,6 +29,12 @@ const DEMO_USER: User = {
 };
 
 export const authMiddleware: MiddlewareHandler = async (c, next) => {
+  // Skip auth for CORS preflight requests
+  if (c.req.method === 'OPTIONS') {
+    await next();
+    return;
+  }
+  
   try {
     const authHeader = c.req.header('Authorization');
     
