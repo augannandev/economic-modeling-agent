@@ -1,6 +1,10 @@
 import { fetchWithAuth } from './serverComm';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5500';
+// Use relative URLs in production, localhost in development
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+    ? 'http://localhost:5500' 
+    : '');
 
 export interface Analysis {
   id: string;

@@ -1,6 +1,10 @@
 import { getAuthHeaders } from './serverComm';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Use relative URLs in production, localhost in development
+const API_BASE = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+    ? 'http://localhost:3001' 
+    : '');
 
 export interface DataPoint {
   time: number;
