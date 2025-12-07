@@ -1,10 +1,7 @@
 import { fetchWithAuth } from './serverComm';
 
 // API URL for plots (direct URLs, not through fetchWithAuth)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
-    ? 'http://localhost:5500' 
-    : '');
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5500';
 
 // Log the API URL at startup for debugging
 if (typeof window !== 'undefined') {

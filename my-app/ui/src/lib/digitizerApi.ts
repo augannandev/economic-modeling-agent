@@ -1,10 +1,7 @@
 import { getAuthHeaders } from './serverComm';
 
-// Use VITE_API_URL in production (Railway backend), localhost in development
-const API_BASE = import.meta.env.VITE_API_URL || 
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
-    ? 'http://localhost:3001' 
-    : '');
+// API URL from environment variable (set in .env.production for builds)
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5500';
 
 export interface DataPoint {
   time: number;
