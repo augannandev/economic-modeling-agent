@@ -50,7 +50,12 @@ app.use('*', async (c, next) => {
 
 // Middleware
 app.use('*', logger());
-app.use('*', cors());
+app.use('*', cors({
+  origin: '*',  // Allow all origins for demo
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+}));
 
 // Health check route - public
 app.get('/', (c) => c.json({ status: 'ok', message: 'API is running' }));

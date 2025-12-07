@@ -1,10 +1,17 @@
 import { getAuth } from 'firebase/auth';
 import { app } from './firebase';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5500';
+// Use VITE_API_URL in production, localhost in development
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+    ? 'http://localhost:5500' 
+    : '');
 
-// Check if we're in demo mode (no real Firebase config)
+// Check if we're in demo mode (anonymous users allowed or no real Firebase config)
 const isDemoMode = () => {
+  const allowAnonymous = import.meta.env.VITE_ALLOW_ANONYMOUS_USERS?.toLowerCase() === 'true';
+  if (allowAnonymous) return true;
+  
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
   return !projectId || projectId === 'demo-project';
 };
