@@ -61,12 +61,23 @@ class KMPlotAnalyzer:
             "ANTHROPIC_API_KEY" if api_provider == "anthropic" else "OPENAI_API_KEY"
         )
         
+        # Debug logging
+        print(f"[KMPlotAnalyzer] api_provider: {api_provider}")
+        print(f"[KMPlotAnalyzer] ANTHROPIC_AVAILABLE: {ANTHROPIC_AVAILABLE}")
+        print(f"[KMPlotAnalyzer] OPENAI_AVAILABLE: {OPENAI_AVAILABLE}")
+        print(f"[KMPlotAnalyzer] api_key set: {bool(self.api_key)}")
+        if self.api_key:
+            print(f"[KMPlotAnalyzer] api_key prefix: {self.api_key[:15]}...")
+        
         if api_provider == "anthropic" and ANTHROPIC_AVAILABLE:
             self.client = anthropic.Anthropic(api_key=self.api_key)
+            print("[KMPlotAnalyzer] Anthropic client initialized successfully")
         elif api_provider == "openai" and OPENAI_AVAILABLE:
             self.client = openai.OpenAI(api_key=self.api_key)
+            print("[KMPlotAnalyzer] OpenAI client initialized successfully")
         else:
             self.client = None
+            print("[KMPlotAnalyzer] WARNING: No LLM client available - will use defaults!")
     
     def analyze_image(self, image_base64: str) -> Dict[str, Any]:
         """
