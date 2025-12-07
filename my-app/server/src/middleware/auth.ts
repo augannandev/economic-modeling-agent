@@ -59,8 +59,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
     const firebaseProjectId = getFirebaseProjectId();
     const firebaseUser = await verifyFirebaseToken(token, firebaseProjectId);
     
-    // Check if anonymous users are allowed
-    const allowAnonymous = getAllowAnonymousUsers();
+    // Check if anonymous users are allowed (already declared above)
     const isAnonymousUser = !firebaseUser.email;
     
     if (!allowAnonymous && isAnonymousUser) {
