@@ -1,6 +1,6 @@
 import { getAuthHeaders } from './serverComm';
 
-// Use relative URLs in production, localhost in development
+// Use VITE_API_URL in production (Railway backend), localhost in development
 const API_BASE = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
     ? 'http://localhost:3001' 
