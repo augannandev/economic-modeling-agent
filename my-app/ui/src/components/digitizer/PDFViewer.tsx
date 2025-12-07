@@ -38,6 +38,13 @@ export function PDFViewer({ onScreenshotCapture }: PDFViewerProps) {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // Suppress unused variable warnings - these are used for PDF.js integration
+  void pdfUrl;
+  void totalPages;
+  void setTotalPages;
+  void canvasRef;
+  void onScreenshotCapture;
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
