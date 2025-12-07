@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Markdown, CompactMarkdown } from '@/components/ui/markdown';
 import { downloadPDF } from '@/lib/pdfUtils';
 import { ChatSidebar } from '@/components/chat';
 import { FinalDecisionPanel } from '@/components/survival';
@@ -847,19 +848,19 @@ function ModelDetailView({
                 <div className="space-y-3">
                   <div className="p-3 bg-primary/5 rounded border">
                     <p className="font-semibold mb-1">Recommendation</p>
-                    <p className="text-sm">{reasoning_assessment.sections.recommendation}</p>
+                    <CompactMarkdown content={reasoning_assessment.sections.recommendation} />
                   </div>
                   {reasoning_assessment.sections.statistical_visual_fit && (
                     <div>
                       <p className="font-semibold mb-1 text-sm">Statistical Fit</p>
-                      <p className="text-sm text-muted-foreground">{reasoning_assessment.sections.statistical_visual_fit}</p>
+                      <CompactMarkdown content={reasoning_assessment.sections.statistical_visual_fit} className="text-muted-foreground" />
                     </div>
                   )}
                 </div>
               ) : (
-                <p className="text-sm whitespace-pre-wrap max-h-48 overflow-y-auto">
-                  {reasoning_assessment.assessment_text || reasoning_assessment.full_text || 'N/A'}
-                </p>
+                <div className="max-h-48 overflow-y-auto">
+                  <CompactMarkdown content={reasoning_assessment.assessment_text || reasoning_assessment.full_text || 'N/A'} />
+                </div>
               )}
             </CardContent>
           </Card>
@@ -897,22 +898,22 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
       <Card>
         <CardHeader><CardTitle>Primary Recommendation</CardTitle></CardHeader>
         <CardContent>
-          <p className="whitespace-pre-wrap">{synthesis.primary_recommendation || 'Not available'}</p>
+          <CompactMarkdown content={synthesis.primary_recommendation || 'Not available'} />
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle>Key Uncertainties</CardTitle></CardHeader>
         <CardContent>
-          <p className="whitespace-pre-wrap">{synthesis.key_uncertainties || 'Not available'}</p>
+          <CompactMarkdown content={synthesis.key_uncertainties || 'Not available'} />
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle>Full Report</CardTitle></CardHeader>
         <CardContent>
-          <div className="max-h-96 overflow-y-auto">
-            <p className="whitespace-pre-wrap text-sm">{synthesis.full_text}</p>
+          <div className="max-h-[600px] overflow-y-auto pr-2">
+            <Markdown content={synthesis.full_text || ''} />
           </div>
         </CardContent>
       </Card>

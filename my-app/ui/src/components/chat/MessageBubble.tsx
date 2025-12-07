@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Bot, User, Wrench, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { CompactMarkdown } from "@/components/ui/markdown";
 
 export type MessageType = 
   | 'user_message'
@@ -89,7 +90,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           )}
           
-          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+          {/* Use markdown rendering for agent messages, plain text for user/status */}
+          {(message.type === 'agent_message' || message.type === 'agent_thinking') ? (
+            <CompactMarkdown content={message.content} />
+          ) : (
+            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+          )}
           
           {isToolUse && message.metadata?.toolInput && (
             <details className="mt-2">

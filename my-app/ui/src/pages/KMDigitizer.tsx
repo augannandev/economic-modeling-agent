@@ -727,26 +727,26 @@ export function KMDigitizer() {
               (tab.id === 'upload' && canProceedToExtraction) ||
               (tab.id === 'extract' && allEndpointsExtracted) ||
               (tab.id === 'edit' && endpoints.some(e => e.editedData));
-            
-            return (
+
+              return (
               <TabsTrigger 
                 key={tab.id} 
                 value={tab.id} 
                 disabled={disabled}
-                className={cn(
+                      className={cn(
                   "gap-2",
                   isComplete && "text-green-600"
-                )}
-              >
-                {isComplete ? (
+                      )}
+                    >
+                      {isComplete ? (
                   <CheckCircle2 className="h-4 w-4" />
                 ) : (
                   <Icon className="h-4 w-4" />
                 )}
                 {tab.label}
               </TabsTrigger>
-            );
-          })}
+              );
+            })}
         </TabsList>
 
         {/* Upload Tab */}
@@ -1081,8 +1081,8 @@ export function KMDigitizer() {
                         <div className="px-4 py-6 text-center text-muted-foreground">
                           <p>No arms detected. The extraction may have failed.</p>
                         </div>
-                      )}
-                    </div>
+      )}
+    </div>
 
                     {/* Quick Preview */}
                     {endpoint.kmPlot && (

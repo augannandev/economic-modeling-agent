@@ -663,20 +663,20 @@ survivalRoutes.post('/analyses/:id/chat/message', async (c) => {
       const result = await processChatMessage(analysisId, message, chatHistory);
 
       // Add agent response to session
-      const agentMessage: ChatMessage = {
-        id: `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: 'agent_message',
+    const agentMessage: ChatMessage = {
+      id: `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: 'agent_message',
         content: result.response,
-        timestamp: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
         // Note: token usage tracked separately, not in metadata
-      };
-      addMessageToSession(analysisId, agentMessage);
+    };
+    addMessageToSession(analysisId, agentMessage);
 
-      return c.json({ 
-        success: true, 
-        message: 'Message sent',
-        response: agentMessage 
-      });
+    return c.json({ 
+      success: true, 
+      message: 'Message sent',
+      response: agentMessage 
+    });
     } catch (agentError) {
       console.error('Chat agent error:', agentError);
       

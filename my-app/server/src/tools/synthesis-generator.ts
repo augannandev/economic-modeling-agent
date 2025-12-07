@@ -1,13 +1,13 @@
 import { createReasoningLLM, estimateCost } from '../lib/llm';
 import { HumanMessage } from '@langchain/core/messages';
 import { NICE_DSU_TSD_14_PRINCIPLES, NICE_DSU_TSD_21_PRINCIPLES } from '../lib/nice-guidelines';
-import { loadRagDocuments } from '../lib/document-loader';
+import { getRAGService, getSimpleRAGContext } from '../lib/rag-service';
+import { formatMarkdown } from '../lib/markdown-formatter';
 import path from 'path';
-import fs from 'fs/promises';
 
 export interface SynthesisReportResult {
-  within_approach_rankings: Record<string, any>;
-  cross_approach_comparison: Record<string, any>;
+  within_approach_rankings: Record<string, unknown>;
+  cross_approach_comparison: Record<string, unknown>;
   primary_recommendation: string;
   sensitivity_recommendations: Array<{ model_id: string; rationale: string }>;
   key_uncertainties: string;
@@ -21,17 +21,106 @@ export interface SynthesisReportResult {
 }
 
 /**
- * Generate cross-model synthesis report
+ * Model assessment data for synthesis
+ */
+interface ModelAssessment {
+  model_id: string;
+  arm: string;
+  approach: string;
+  distribution?: string;
+  aic: number;
+  bic: number;
+  vision_scores: { short_term: number; long_term: number };
+  vision_observations: { short_term: string; long_term: string };
+  reasoning_summary: string;
+  // New fields from enhanced vision analyzer
+  extracted_predictions?: {
+    year1?: number;
+    year2?: number;
+    year5?: number;
+    year10?: number;
+  };
+  recommendation?: 'Base Case' | 'Scenario' | 'Screen Out';
+  red_flags?: string[];
+}
+
+/**
+ * Get comprehensive RAG context for synthesis
+ */
+async function getSynthesisRAGContext(indication?: string): Promise<string> {
+  try {
+    const ragService = getRAGService();
+    
+    // Query for NICE methodology (TSD14, TSD16)
+    const methodologyResults = await ragService.query(
+      'NICE TSD14 survival extrapolation model selection criteria uncertainty',
+      5
+    );
+    
+    // Query for benchmarks
+    const benchmarkResults = indication 
+      ? await ragService.query(`${indication} survival benchmark external data 5-year 10-year`, 3)
+      : [];
+    
+    let context = '';
+    
+    if (methodologyResults.length > 0) {
+      context += '## NICE Methodology Guidance\n\n';
+      for (const result of methodologyResults) {
+        context += `**[${result.source}]**\n${result.content}\n\n`;
+      }
+    }
+    
+    if (benchmarkResults.length > 0) {
+      context += '\n## External Benchmark Data\n\n';
+      for (const result of benchmarkResults) {
+        context += `**[${result.source}]**\n${result.content}\n\n`;
+      }
+    }
+    
+    return context;
+  } catch (error) {
+    console.warn('[SynthesisGenerator] RAG query failed, using fallback:', error);
+    
+    // Fallback to simple file-based context
+    try {
+      const ragDir = path.join(process.cwd(), '..', 'rag_data');
+      const simpleContext = await getSimpleRAGContext(ragDir, 'TSD survival model selection');
+      return `## Methodology Context\n\n${simpleContext}`;
+    } catch {
+      return '';
+    }
+  }
+}
+
+/**
+ * Build model summary table for prompt
+ */
+function buildModelSummaryTable(models: ModelAssessment[], arm: string): string {
+  const armModels = models
+    .filter(m => m.arm === arm)
+    .sort((a, b) => a.aic - b.aic);
+  
+  if (armModels.length === 0) return '*No models for this arm*';
+  
+  let table = '| Model | AIC | Fit | Extrap | 5yr | Decision |\n';
+  table += '| --- | --- | --- | --- | --- | --- |\n';
+  
+  for (const m of armModels) {
+    const year5 = m.extracted_predictions?.year5 
+      ? `${(m.extracted_predictions.year5 * 100).toFixed(0)}%` 
+      : 'N/A';
+    table += `| ${m.distribution || m.approach} | ${m.aic.toFixed(0)} | ${m.vision_scores.short_term}/10 | ${m.vision_scores.long_term}/10 | ${year5} | ${m.recommendation || 'TBD'} |\n`;
+  }
+  
+  return table;
+}
+
+/**
+ * Generate cross-model synthesis report (3000 words)
  */
 export async function synthesizeCrossModel(
-  allModelAssessments: Array<{
-    model_id: string;
-    arm: string;
-    approach: string;
-    distribution?: string;
-    vision_scores: { short_term: number; long_term: number };
-    reasoning_summary: string;
-  }>,
+  allModelAssessments: ModelAssessment[],
   phTestResults?: {
     chow_test_pvalue: number;
     schoenfeld_pvalue: number;
@@ -44,115 +133,171 @@ export async function synthesizeCrossModel(
 ): Promise<SynthesisReportResult> {
   const llm = createReasoningLLM();
 
-  // Load RAG documents (Core Docs Only Strategy)
-  const ragDir = path.join(process.cwd(), 'data', 'rag_docs');
-  // We filter for TSD 14 and 21 as per user agreement to save tokens/cost
-  // Matches filenames containing "TSD_14" or "TSD_21" (case insensitive usually, but here exact string match on part)
-  // Assuming user filenames are like "TSD_14.txt" or similar. 
-  // We'll use a broad match for "14" and "21" combined with "TSD" if possible, 
-  // but for now let's pass the specific identifiers the user likely used.
-  const coreDocs = ['TSD_14', 'TSD 14', 'TSD14', 'TSD_21', 'TSD 21', 'TSD21'];
-  const ragContext = await loadRagDocuments(ragDir, coreDocs);
+  // Get RAG context
+  const ragContext = await getSynthesisRAGContext();
 
-  // Load Style Guide
-  let styleGuide = '';
-  try {
-    styleGuide = await fs.readFile(path.join(process.cwd(), '..', 'synthesis_report_style.md'), 'utf-8');
-  } catch (e) {
-    console.warn('Style guide not found, using default style.');
-  }
+  // Categorize models
+  const baseCaseModels = allModelAssessments.filter(m => m.recommendation === 'Base Case');
+  const scenarioModels = allModelAssessments.filter(m => m.recommendation === 'Scenario');
+  const screenedOutModels = allModelAssessments.filter(m => m.recommendation === 'Screen Out');
 
+  // Group by approach
+  const byApproach = {
+    'One-piece': allModelAssessments.filter(m => m.approach === 'One-piece'),
+    'Piecewise': allModelAssessments.filter(m => m.approach === 'Piecewise'),
+    'Spline': allModelAssessments.filter(m => m.approach === 'Spline')
+  };
+
+  // Build comprehensive prompt
   const prompt = `${NICE_DSU_TSD_14_PRINCIPLES}
 
 ${NICE_DSU_TSD_21_PRINCIPLES}
 
-You have completed comprehensive assessment of 42 survival models (21 per arm) across three approaches:
-- One-piece parametric models (6 distributions × 2 arms = 12 models)
-- Piecewise parametric models (6 distributions × 2 arms = 12 models)
-- Royston-Parmar spline models (3 scales × 3 knot configurations × 2 arms = 18 models)
+You are synthesizing survival model analysis for an HTA submission.
+Total models analyzed: ${allModelAssessments.length}
 
-REFERENCE DOCUMENTS (RAG CONTEXT):
-Use the following documents to guide your formatting, tone, and methodology citations.
+## RAG CONTEXT (Methodology & Benchmarks)
+
 ${ragContext}
 
-STYLE GUIDE (MANDATORY):
-Follow these writing guidelines strictly.
-${styleGuide}
+## MODEL SUMMARY BY ARM
 
-MODEL ASSESSMENTS:
-${JSON.stringify(allModelAssessments, null, 2)}
+### Chemotherapy Arm
+${buildModelSummaryTable(allModelAssessments, 'chemo')}
 
-PH TESTING RESULTS (HARD FACTS):
-${phTestResults ? JSON.stringify(phTestResults, null, 2) : 'Not available'}
-${phTestResults?.crossing_detected ? `CRITICAL: A crossing was definitively detected at t=${phTestResults.crossing_time?.toFixed(2)} months. You MUST prioritize separate models.` : ''}
+### Pembrolizumab Arm
+${buildModelSummaryTable(allModelAssessments, 'pembro')}
 
-Generate a comprehensive synthesis report (6000-8000 words) covering:
+## MODEL DECISIONS (Pre-computed by Vision + Reasoning)
 
-1. EXECUTIVE SUMMARY
-   - Brief overview of analysis
-   - Key findings
-   - Primary recommendation
+**Base Case Candidates (${baseCaseModels.length}):** ${baseCaseModels.map(m => `${m.distribution} (${m.arm})`).join(', ') || 'None'}
 
-2. DATA OVERVIEW
-   - Summary of trial data
-   - Proportional hazards testing results
-   - Rationale for separate arm modeling
+**Scenario Candidates (${scenarioModels.length}):** ${scenarioModels.map(m => `${m.distribution} (${m.arm})`).join(', ') || 'None'}
 
-3. WITHIN-APPROACH RANKINGS
-   - Best models per approach per arm
-   - Justification for rankings
-   - Note: AIC/BIC comparisons only within same approach
+**Screened Out (${screenedOutModels.length}):** ${screenedOutModels.map(m => `${m.distribution} (${m.arm})`).join(', ') || 'None'}
 
-4. CROSS-APPROACH COMPARISON MATRIX
-   Compare approaches across:
-   - Short-term fit quality (from vision scores)
-   - Long-term plausibility (from vision scores)
-   - External validation (SEER comparison)
-   - Methodological transparency
-   - HTA reviewer acceptability
+## PH TESTING RESULTS
+${phTestResults ? `
+- Schoenfeld p-value: ${phTestResults.schoenfeld_pvalue.toFixed(4)}
+- Chow test p-value: ${phTestResults.chow_test_pvalue.toFixed(4)}
+- Log-rank p-value: ${phTestResults.logrank_pvalue.toFixed(4)}
+- Decision: ${phTestResults.decision}
+- Rationale: ${phTestResults.rationale}
+${phTestResults.crossing_detected ? `⚠️ **Curve Crossing Detected at t=${phTestResults.crossing_time?.toFixed(1)} months**` : ''}
+` : 'Not available'}
 
-5. PRIMARY RECOMMENDATION (800-1000 words)
-   - Base case model selection
-   - Detailed justification
-   - Why this model over alternatives
+## RED FLAGS ACROSS MODELS
+${allModelAssessments.flatMap(m => (m.red_flags || []).map(f => `- ${m.distribution}: ${f}`)).join('\n') || 'No critical red flags identified'}
 
-6. SENSITIVITY ANALYSIS RECOMMENDATIONS
-   - Alternative models to include
-   - Rationale for each alternative
-   - Expected impact on results
+## DETAILED REASONING SUMMARIES
 
-7. KEY UNCERTAINTIES (500-700 words)
-   - Where models disagree and why
-   - Sources of uncertainty
-   - Implications for decision-making
+${allModelAssessments.map(m => `
+### ${m.distribution || m.approach} (${m.arm})
+${m.reasoning_summary}
+`).join('\n')}
 
-8. HTA SUBMISSION STRATEGY (400-500 words)
-   - How to present findings
-   - Key messages for reviewers
-   - Recommended presentation format
+---
 
-Format your response as structured text with clear section headings.`;
+## OUTPUT REQUIREMENTS (3000 words)
+
+Generate a comprehensive synthesis report with the following structure:
+
+### 1. EXECUTIVE SUMMARY (300 words)
+- Key findings overview
+- Primary recommendation for each arm
+- Critical uncertainties
+
+### 2. PROPORTIONAL HAZARDS ASSESSMENT (200 words)
+- Interpret PH test results
+- Justify separate/pooled modeling decision
+- Cite TSD14 guidance from RAG context
+
+### 3. WITHIN-APPROACH COMPARISON (600 words)
+
+**One-piece Parametric (${byApproach['One-piece'].length} models):**
+- Best performers per arm
+- Common issues observed
+- Ranking rationale
+
+**Piecewise (${byApproach['Piecewise'].length} models):**
+- Improvement over one-piece?
+- Cutpoint appropriateness
+- Ranking rationale
+
+**Spline (${byApproach['Spline'].length} models):**
+- Flexibility benefits
+- Overfitting concerns
+- Ranking rationale
+
+### 4. CROSS-APPROACH COMPARISON (400 words)
+- Statistical fit comparison (AIC caveats)
+- Extrapolation plausibility comparison
+- Clinical appropriateness
+- HTA reviewer perspective
+
+### 5. PRIMARY RECOMMENDATIONS (500 words)
+
+**Chemotherapy Arm Base Case:**
+- Selected model and distribution
+- Fit justification
+- Extrapolation justification
+- Benchmark alignment
+
+**Pembrolizumab Arm Base Case:**
+- Selected model and distribution
+- Fit justification
+- Extrapolation justification
+- Benchmark alignment
+
+### 6. SCENARIO ANALYSIS (400 words)
+- Conservative scenario (pessimistic extrapolation)
+- Optimistic scenario
+- Structural sensitivity (alternative approach)
+- When to use each scenario
+
+### 7. UNCERTAINTIES & HTA STRATEGY (400 words)
+- Key areas of disagreement between models
+- Recommendations for ERG/committee
+- Suggested presentation format
+- Value of information considerations
+
+### 8. SUMMARY TABLE
+Include a formatted markdown table with:
+| Arm | Base Case | Rationale | Scenario 1 | Scenario 2 |
+
+---
+
+FORMATTING REQUIREMENTS:
+- Use proper markdown headings (##, ###)
+- Use bullet points for lists
+- Bold key terms and model names
+- Include the summary table at the end
+- Cite TSD14/TSD21 where relevant (from RAG context)
+- No raw asterisks - format properly`;
 
   const messages = [new HumanMessage({ content: prompt })];
   const response = await llm.invoke(messages);
-  const content = response.content as string;
+  let content = response.content as string;
 
-  // Extract structured components (simplified - could be improved with better parsing)
-  const within_approach_rankings = extractJSONSection(content, 'WITHIN-APPROACH RANKINGS');
-  const cross_approach_comparison = extractJSONSection(content, 'CROSS-APPROACH COMPARISON');
-  const primary_recommendation = extractSection(content, 'PRIMARY RECOMMENDATION', 'SENSITIVITY');
+  // Format the markdown output
+  content = formatMarkdown(content);
+
+  // Extract structured components
+  const within_approach_rankings = extractApproachRankings(content);
+  const cross_approach_comparison = extractCrossApproach(content);
+  const primary_recommendation = extractSection(content, 'PRIMARY RECOMMENDATION', 'SCENARIO ANALYSIS');
   const sensitivity_recommendations = extractSensitivityRecommendations(content);
-  const key_uncertainties = extractSection(content, 'KEY UNCERTAINTIES', 'HTA');
-  const hta_strategy = extractSection(content, 'HTA SUBMISSION STRATEGY', '');
+  const key_uncertainties = extractSection(content, 'UNCERTAINTIES', 'SUMMARY TABLE');
+  const hta_strategy = extractSection(content, 'HTA STRATEGY', 'SUMMARY');
 
   // Estimate token usage
   const inputTokens = Math.ceil(prompt.length / 4);
   const outputTokens = Math.ceil(content.length / 4);
-  const cost = estimateCost('openai', inputTokens, outputTokens);
+  const cost = estimateCost('anthropic', inputTokens, outputTokens);
 
   return {
-    within_approach_rankings: within_approach_rankings || {},
-    cross_approach_comparison: cross_approach_comparison || {},
+    within_approach_rankings,
+    cross_approach_comparison,
     primary_recommendation,
     sensitivity_recommendations,
     key_uncertainties,
@@ -167,60 +312,63 @@ Format your response as structured text with clear section headings.`;
 }
 
 function extractSection(text: string, startMarker: string, endMarker: string): string {
-  const startIdx = text.indexOf(startMarker);
+  const startIdx = text.toLowerCase().indexOf(startMarker.toLowerCase());
   if (startIdx === -1) return '';
 
-  const endIdx = endMarker ? text.indexOf(endMarker, startIdx) : text.length;
+  const endIdx = endMarker ? text.toLowerCase().indexOf(endMarker.toLowerCase(), startIdx) : text.length;
   if (endIdx === -1) return text.substring(startIdx);
 
   return text.substring(startIdx, endIdx).trim();
 }
 
-function extractJSONSection(text: string, marker: string): any {
-  const section = extractSection(text, marker, '');
-  const jsonMatch = section.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0]);
-    } catch {
-      return null;
+function extractApproachRankings(text: string): Record<string, unknown> {
+  const rankings: Record<string, unknown> = {};
+  
+  const approaches = ['One-piece', 'Piecewise', 'Spline'];
+  for (const approach of approaches) {
+    const section = extractSection(text, `**${approach}`, '**');
+    if (section) {
+      rankings[approach] = section;
     }
   }
-  return null;
+  
+  return rankings;
+}
+
+function extractCrossApproach(text: string): Record<string, unknown> {
+  const section = extractSection(text, 'CROSS-APPROACH COMPARISON', 'PRIMARY RECOMMENDATION');
+  return { summary: section };
 }
 
 function extractSensitivityRecommendations(text: string): Array<{ model_id: string; rationale: string }> {
-  const section = extractSection(text, 'SENSITIVITY ANALYSIS', 'KEY UNCERTAINTIES');
-  // Simple extraction - could be improved
+  const section = extractSection(text, 'SCENARIO ANALYSIS', 'UNCERTAINTIES');
   const recommendations: Array<{ model_id: string; rationale: string }> = [];
 
-  // Look for model IDs and rationales in the text
-  const lines = section.split('\n').filter(line => line.trim());
-  let currentModel: string | null = null;
-  let currentRationale: string[] = [];
-
-  for (const line of lines) {
-    if (line.match(/model.*id|model_id/i)) {
-      if (currentModel) {
-        recommendations.push({
-          model_id: currentModel,
-          rationale: currentRationale.join(' '),
-        });
-      }
-      currentModel = line;
-      currentRationale = [];
-    } else if (currentModel) {
-      currentRationale.push(line);
-    }
-  }
-
-  if (currentModel) {
+  // Look for scenario patterns
+  const conservativeMatch = section.match(/conservative[:\s]+([^.]+)/i);
+  if (conservativeMatch) {
     recommendations.push({
-      model_id: currentModel,
-      rationale: currentRationale.join(' '),
+      model_id: 'conservative',
+      rationale: conservativeMatch[1].trim()
     });
   }
 
-  return recommendations.length > 0 ? recommendations : [];
+  const optimisticMatch = section.match(/optimistic[:\s]+([^.]+)/i);
+  if (optimisticMatch) {
+    recommendations.push({
+      model_id: 'optimistic',
+      rationale: optimisticMatch[1].trim()
+    });
+  }
+
+  const structuralMatch = section.match(/structural[:\s]+([^.]+)/i);
+  if (structuralMatch) {
+    recommendations.push({
+      model_id: 'structural',
+      rationale: structuralMatch[1].trim()
+    });
+  }
+
+  return recommendations;
 }
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CompactMarkdown } from '@/components/ui/markdown';
 import { ModelSelector } from './ModelSelector';
 import { 
   CheckCircle2, 
@@ -200,7 +201,9 @@ export function FinalDecisionPanel({
                     Approach: {rec.recommended_approach}
                   </p>
                   
-                  <p className="mt-3 text-sm">{rec.reasoning}</p>
+                  <div className="mt-3">
+                    <CompactMarkdown content={rec.reasoning} />
+                  </div>
                 </div>
                 
                 <div className="flex gap-2 ml-4">

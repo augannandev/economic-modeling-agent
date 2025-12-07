@@ -686,9 +686,15 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
     arm: model.model_result.arm,
     approach: model.model_result.approach,
     distribution: model.model_result.distribution,
+    aic: model.model_result.aic,
+    bic: model.model_result.bic,
     vision_scores: {
       short_term: model.vision_assessment?.short_term_score || 0,
       long_term: model.vision_assessment?.long_term_score || 0,
+    },
+    vision_observations: {
+      short_term: model.vision_assessment?.short_term_observations || '',
+      long_term: model.vision_assessment?.long_term_observations || '',
     },
     reasoning_summary: model.reasoning_assessment?.full_text.substring(0, 500) || '',
   }));

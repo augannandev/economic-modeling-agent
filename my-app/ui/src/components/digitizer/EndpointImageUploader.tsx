@@ -91,24 +91,24 @@ export function EndpointImageUploader({
             {/* Endpoint Type Select */}
             <div className="flex items-center gap-2">
               <Label className="text-sm text-muted-foreground">Type:</Label>
-              <select
+            <select
                 className="h-8 px-2 text-sm border rounded bg-background"
-                value={endpoint.endpointType}
-                onChange={(e) => onUpdate(index, 'endpointType', e.target.value)}
-              >
+              value={endpoint.endpointType}
+              onChange={(e) => onUpdate(index, 'endpointType', e.target.value)}
+            >
                 {endpointOptions.map(opt => (
                   <option key={opt} value={opt}>{opt}</option>
                 ))}
-              </select>
-            </div>
+            </select>
+          </div>
             
             {/* Arm Select */}
             <div className="flex items-center gap-2">
               <Label className="text-sm text-muted-foreground">Arm:</Label>
               <select
                 className="h-8 px-2 text-sm border rounded bg-background"
-                value={endpoint.arm}
-                onChange={(e) => onUpdate(index, 'arm', e.target.value)}
+              value={endpoint.arm}
+              onChange={(e) => onUpdate(index, 'arm', e.target.value)}
               >
                 {armOptions.map(opt => (
                   <option key={opt} value={opt}>{opt}</option>

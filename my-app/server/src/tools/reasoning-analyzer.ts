@@ -3,22 +3,27 @@ import { HumanMessage } from '@langchain/core/messages';
 import { NICE_DSU_EVALUATION_PROMPT, NICE_DSU_TSD_14_PRINCIPLES, NICE_DSU_TSD_21_PRINCIPLES } from '../lib/nice-guidelines';
 import type { VisionAssessmentResult } from './vision-analyzer';
 import type { ModelFitResult } from '../services/python-service';
+import { getRAGService, getSimpleRAGContext } from '../lib/rag-service';
+import path from 'path';
 
 export interface ReasoningAssessmentResult {
   full_text: string;
   sections: {
-    ph_assumption: string;
-    statistical_performance: string;
-    visual_fit: string;
+    statistical_fit: string;
     extrapolation: string;
-    strengths: string;
-    weaknesses: string;
-    clinical_plausibility: string;
-    nice_compliance: string;
-    scenarios: string;
-    recommendation: string;
-    uncertainties: string;
-    // New concise sections
+    strengths: string[];
+    weaknesses: string[];
+    decision: 'Base Case' | 'Scenario' | 'Screen Out';
+    justification: string;
+    // Legacy fields for backward compatibility
+    ph_assumption?: string;
+    statistical_performance?: string;
+    visual_fit?: string;
+    clinical_plausibility?: string;
+    nice_compliance?: string;
+    scenarios?: string;
+    recommendation?: string;
+    uncertainties?: string;
     statistical_visual_fit?: string;
     strengths_weaknesses?: string;
   };
@@ -30,7 +35,55 @@ export interface ReasoningAssessmentResult {
 }
 
 /**
- * Comprehensive reasoning analysis using Reasoning LLM (Claude Sonnet 4.5)
+ * Get RAG context for model assessment
+ */
+async function getModelRAGContext(
+  distribution: string,
+  approach: string,
+  indication?: string
+): Promise<string> {
+  try {
+    const ragService = getRAGService();
+    
+    // Query for methodology guidance
+    const methodologyContext = await ragService.queryMethodology(
+      distribution,
+      `${approach} extrapolation plausibility`
+    );
+    
+    // Query for benchmarks if indication provided
+    let benchmarkContext = '';
+    if (indication) {
+      benchmarkContext = await ragService.queryBenchmarks(indication, 'overall');
+    }
+    
+    if (methodologyContext || benchmarkContext) {
+      return `
+## RAG CONTEXT (Methodology & Benchmarks)
+
+${methodologyContext ? `### Methodology Guidance\n${methodologyContext}` : ''}
+
+${benchmarkContext ? `### External Benchmarks\n${benchmarkContext}` : ''}
+`;
+    }
+    
+    return '';
+  } catch (error) {
+    console.warn('[ReasoningAnalyzer] RAG query failed, using fallback:', error);
+    
+    // Fallback to simple file-based context
+    try {
+      const ragDir = path.join(process.cwd(), '..', 'rag_data');
+      return await getSimpleRAGContext(ragDir, `${distribution} ${approach} survival`);
+    } catch {
+      return '';
+    }
+  }
+}
+
+/**
+ * Concise reasoning analysis (200-word format) per plan specification
+ * Uses Vision JSON output + RAG context
  */
 export async function assessWithReasoningLLM(
   modelResult: ModelFitResult,
@@ -45,71 +98,82 @@ export async function assessWithReasoningLLM(
 ): Promise<ReasoningAssessmentResult> {
   const llm = createReasoningLLM();
 
-  // Default MOA if not provided (for this specific agent context)
-  if (!clinicalContext.mechanism_of_action && clinicalContext.indication?.includes('NSCLC')) {
-    clinicalContext.mechanism_of_action = 'Immunotherapy (Checkpoints inhibitor) vs Chemotherapy. Expect delayed treatment effect (lag) and potential crossing of survival curves.';
-  }
+  // Get RAG context
+  const ragContext = await getModelRAGContext(
+    modelResult.distribution || modelResult.approach,
+    modelResult.approach,
+    clinicalContext.indication
+  );
 
-  const prompt = `${NICE_DSU_EVALUATION_PROMPT}
+  // Pre-compute key metrics from vision assessment
+  const fitScore = visionAssessment.short_term_score;
+  const extrapScore = visionAssessment.long_term_score;
+  const aicRank = (modelResult as any).aicRank || 'N/A';
+  
+  // Extract predictions for comparison
+  const predictions = visionAssessment.extracted_predictions || {};
+  const benchmarkComparison = visionAssessment.benchmark_comparison || {
+    plausibility_rating: 'plausible' as const,
+    notes: 'No benchmark data'
+  };
 
-${NICE_DSU_TSD_14_PRINCIPLES}
+  // Build concise prompt (per plan: 200 words output)
+  const prompt = `You are a senior health economist synthesizing vision analysis for a survival model.
 
-${NICE_DSU_TSD_21_PRINCIPLES}
+## INPUT DATA (DO NOT REPEAT - SUMMARIZE ONLY)
 
-MODEL INFORMATION:
-${JSON.stringify(modelResult, null, 2)}
+**Scores:** AIC=${modelResult.aic?.toFixed(2) || 'N/A'} (Rank #${aicRank}) | Fit ${fitScore}/10 | Extrapolation ${extrapScore}/10
 
-VISION ASSESSMENT:
-${JSON.stringify(visionAssessment, null, 2)}
+**Vision Observations:**
+- Early (0-6mo): ${visionAssessment.observations?.early?.fit_quality || 'N/A'}
+- Mid (6-18mo): ${visionAssessment.observations?.mid?.fit_quality || 'N/A'}
+- Late (18mo+): ${visionAssessment.observations?.late?.fit_quality || 'N/A'}
+- Extrapolation: ${visionAssessment.observations?.extrapolation?.trajectory || 'N/A'}
 
-CLINICAL CONTEXT:
-${JSON.stringify(clinicalContext, null, 2)}
+**Predictions Extracted:**
+${predictions.year5 !== undefined ? `- 5yr: ${(predictions.year5 * 100).toFixed(1)}%` : ''}
+${predictions.year10 !== undefined ? `- 10yr: ${(predictions.year10 * 100).toFixed(1)}%` : ''}
 
-PH DIAGNOSTIC PLOTS (Base64):
-${phPlots ? 'Provided (Log-Cumulative Hazard & Schoenfeld)' : 'Not provided'}
+**Benchmark Comparison:**
+${benchmarkComparison.notes || 'No benchmark data'}
+- Plausibility: ${benchmarkComparison.plausibility_rating || 'N/A'}
 
-Provide a CONCISE clinical assessment (approx. 600-800 words) covering these 4 critical sections:
+**Red Flags:** ${visionAssessment.red_flags?.join('; ') || 'None'}
 
-1. STATISTICAL & VISUAL FIT
-   - Synthesize AIC/BIC (is it competitive?) and Visual Fit (does it hit the data?).
-   - Be direct: "AIC=1200 is superior to Exponential (1250)..."
-   - Does the curve follow the KM data well?
+${ragContext}
 
-2. EXTRAPOLATION & CLINICAL PLAUSIBILITY
-   - Is the tail behavior (5yr, 10yr) clinically realistic for this indication?
-   - Does it align with the MOA (e.g. plateau for immunotherapy)?
+## OUTPUT FORMAT (EXACTLY 200 WORDS)
 
-3. STRENGTHS & WEAKNESSES
-   - Bullet points of key pros/cons.
+**Statistical Fit (50 words):**
+Is AIC competitive among the 6 distributions? Does visual tracking match KM well?
 
-4. FINAL RECOMMENDATION
-   - "Suitable for Base Case", "Consider for Sensitivity Analysis", or "Not Recommended".
-   - Avoid "Reject" unless scientifically impossible. Prefer "Consider for Sensitivity Analysis" for plausible but suboptimal models.
-   - Brief justification.
+**Extrapolation (80 words):**
+5yr = X% predicted vs Y% benchmark (±Z% deviation). Is tail plausible for ${clinicalContext.indication || 'this indication'}?
 
-Format as structured text with clear headings.`;
+**Strengths (30 words):**
+- [Bullet 1]
+- [Bullet 2]
+
+**Weaknesses (30 words):**
+- [Bullet 1]
+- [Bullet 2]
+
+**Decision (10 words):**
+[Base Case / Scenario / Screen Out] - [one-line why]
+
+DECISION CRITERIA:
+- **Base Case**: Top 2-3 AIC, fit ≥7, extrap ≥6, no red flags
+- **Scenario**: Fit ≥5, provides useful sensitivity, minor concerns
+- **Screen Out**: Fit <5, implausible extrap, or critical red flags
+
+Respond with ONLY the filled-in format above. No preamble.`;
 
   const messages = [new HumanMessage({ content: prompt })];
   const response = await llm.invoke(messages);
   const content = response.content as string;
 
-  // Parse sections
-  const sections = {
-    statistical_visual_fit: extractSection(content, 'STATISTICAL & VISUAL FIT', 'EXTRAPOLATION & CLINICAL PLAUSIBILITY'),
-    clinical_plausibility: extractSection(content, 'EXTRAPOLATION & CLINICAL PLAUSIBILITY', 'STRENGTHS & WEAKNESSES'),
-    strengths_weaknesses: extractSection(content, 'STRENGTHS & WEAKNESSES', 'FINAL RECOMMENDATION'),
-    recommendation: extractSection(content, 'FINAL RECOMMENDATION', ''),
-    // Keep old fields empty or mapped for compatibility if needed, but we'll focus on these 4
-    ph_assumption: '',
-    statistical_performance: '',
-    visual_fit: '',
-    extrapolation: '',
-    strengths: '',
-    weaknesses: '',
-    nice_compliance: '',
-    scenarios: '',
-    uncertainties: '',
-  };
+  // Parse the structured response
+  const sections = parseReasoningResponse(content);
 
   // Estimate token usage
   const inputTokens = Math.ceil(prompt.length / 4);
@@ -127,14 +191,61 @@ Format as structured text with clear headings.`;
   };
 }
 
-function extractSection(text: string, startMarker: string, endMarker: string): string {
-  const startIdx = text.indexOf(startMarker);
-  if (startIdx === -1) return '';
+/**
+ * Parse the structured 200-word response
+ */
+function parseReasoningResponse(content: string): ReasoningAssessmentResult['sections'] {
+  const extractSection = (text: string, marker: string, endMarkers: string[]): string => {
+    const startIdx = text.indexOf(marker);
+    if (startIdx === -1) return '';
+    
+    let endIdx = text.length;
+    for (const endMarker of endMarkers) {
+      const idx = text.indexOf(endMarker, startIdx + marker.length);
+      if (idx !== -1 && idx < endIdx) {
+        endIdx = idx;
+      }
+    }
+    
+    return text.substring(startIdx + marker.length, endIdx).trim();
+  };
 
-  const endIdx = endMarker ? text.indexOf(endMarker, startIdx) : text.length;
-  if (endIdx === -1) return text.substring(startIdx);
+  const extractBullets = (text: string): string[] => {
+    const bullets = text.match(/^[-•]\s*(.+)$/gm);
+    if (!bullets) return [text.trim()];
+    return bullets.map(b => b.replace(/^[-•]\s*/, '').trim()).filter(Boolean);
+  };
 
-  return text.substring(startIdx, endIdx).trim();
+  const statisticalFit = extractSection(content, '**Statistical Fit', ['**Extrapolation', '**Strengths']);
+  const extrapolation = extractSection(content, '**Extrapolation', ['**Strengths', '**Weaknesses']);
+  const strengthsText = extractSection(content, '**Strengths', ['**Weaknesses', '**Decision']);
+  const weaknessesText = extractSection(content, '**Weaknesses', ['**Decision']);
+  const decisionText = extractSection(content, '**Decision', []);
+
+  // Parse decision
+  let decision: 'Base Case' | 'Scenario' | 'Screen Out' = 'Scenario';
+  if (decisionText.toLowerCase().includes('base case')) {
+    decision = 'Base Case';
+  } else if (decisionText.toLowerCase().includes('screen out')) {
+    decision = 'Screen Out';
+  }
+
+  // Extract justification (everything after the decision keyword)
+  const justificationMatch = decisionText.match(/(?:Base Case|Scenario|Screen Out)\s*[-–—:]\s*(.+)/i);
+  const justification = justificationMatch ? justificationMatch[1].trim() : decisionText;
+
+  return {
+    statistical_fit: statisticalFit.replace(/^\(.*?\):?\s*/, ''),
+    extrapolation: extrapolation.replace(/^\(.*?\):?\s*/, ''),
+    strengths: extractBullets(strengthsText),
+    weaknesses: extractBullets(weaknessesText),
+    decision,
+    justification,
+    // Legacy compatibility
+    recommendation: decisionText,
+    statistical_visual_fit: statisticalFit,
+    strengths_weaknesses: `Strengths: ${strengthsText}\n\nWeaknesses: ${weaknessesText}`,
+  };
 }
 
 /**
@@ -151,74 +262,38 @@ export async function assessPHAssumption(
   },
   clinicalContext: { indication?: string; mechanism_of_action?: string }
 ): Promise<{ decision: 'separate' | 'pooled'; rationale: string }> {
-  // Use Reasoning LLM (Claude Sonnet 4.5) for vision analysis
   const llm = createReasoningLLM();
 
   console.log('🔍 Assessing PH Assumption with Claude Sonnet 4.5...');
-  console.log('📊 Statistical Results:', JSON.stringify(statisticalResults, null, 2));
-  console.log('📊 Log-Cumulative Hazard Plot Length:', phPlots.log_cumulative_hazard?.length || 0);
-  console.log('📊 Schoenfeld Residuals Plot Length:', phPlots.schoenfeld_residuals?.length || 0);
 
   if (!phPlots.log_cumulative_hazard || phPlots.log_cumulative_hazard.length < 100) {
-    throw new Error('❌ ERROR: Log-Cumulative Hazard plot data is missing or invalid!');
+    throw new Error('Log-Cumulative Hazard plot data is missing or invalid');
   }
   if (!phPlots.schoenfeld_residuals || phPlots.schoenfeld_residuals.length < 100) {
-    throw new Error('❌ ERROR: Schoenfeld Residuals plot data is missing or invalid!');
+    throw new Error('Schoenfeld Residuals plot data is missing or invalid');
   }
 
-  const prompt = `You are a senior biostatistician analyzing proportional hazards (PH) assumption for a Health Technology Assessment.
-
-CRITICAL: You MUST analyze the PLOTS FIRST. Do NOT rely on p-values alone.
+  const prompt = `You are a senior biostatistician analyzing proportional hazards (PH) assumption for an HTA.
 
 CLINICAL CONTEXT:
 - Indication: ${clinicalContext.indication || 'Unknown'}
 - Mechanism: ${clinicalContext.mechanism_of_action || 'Unknown'}
-- Note: Immunotherapies often show delayed effects → crossing curves
 
-STATISTICAL RESULTS:
-(HIDDEN TO FORCE VISUAL ANALYSIS - YOU MUST LOOK AT THE PLOTS)
-
-COMPUTED CROSSING ANALYSIS (HARD FACT - DO NOT IGNORE):
-- Crossing Detected in Data: ${statisticalResults.crossing_detected ? 'YES' : 'NO'}
+COMPUTED CROSSING ANALYSIS:
+- Crossing Detected: ${statisticalResults.crossing_detected ? 'YES' : 'NO'}
 ${statisticalResults.crossing_detected ? `- Crossing Time: t ≈ ${statisticalResults.crossing_time?.toFixed(2)} months` : ''}
-- Note: This is calculated directly from the Kaplan-Meier data. If YES, the curves DEFINITELY cross.
 
-YOU WILL NOW SEE TWO PLOTS:
-1. Log-Cumulative Hazard Plot
-2. Schoenfeld Residuals Plot
+Analyze the two plots (Log-Cumulative Hazard & Schoenfeld Residuals):
 
-IF YOU CANNOT SEE THE PLOTS, OUTPUT: {"decision": "separate", "rationale": "ERROR: Plots not visible. Defaulting to separate models due to immunotherapy context."}
+1. Do the curves cross in the log-cumulative hazard plot?
+2. Is the Schoenfeld LOWESS trend flat?
 
-MANDATORY VISUAL ANALYSIS STEPS (DO THESE IN ORDER):
-STEP 1: EXAMINE LOG-CUMULATIVE HAZARD PLOT
-- Identify which line is chemotherapy (usually blue) and which is pembrolizumab (usually orange/red)
-- Scan from t=0 to t=5: Do the lines cross? Note the exact time if yes.
-- Scan from t=5 to t=10: Do they cross here? Note it.
-- After t=10: Are they parallel, diverging, or converging?
-
-STEP 2: EXAMINE SCHOENFELD RESIDUALS PLOT
-- Is the LOWESS trend line (smooth curve) flat around zero?
-- Or does it show curvature/slope?
-
-STEP 3: MAKE DECISION
-- IF you see ANY crossing in Step 1 → PH VIOLATED → decision="separate"
-- IF lines are parallel throughout AND Schoenfeld is flat → PH VALID → decision="pooled"
-- IF uncertain but immunotherapy context → PH VIOLATED → decision="separate"
-
-CRITICAL RULES:
-1. Visual crossing ALWAYS overrides p-values
-2. Early crossing (t<10) is VERY common with immunotherapy
-3. P-values often miss early crossings due to low power
-4. Your rationale MUST describe what you SEE in the plots, not just report p-values
-5. IF "Crossing Detected" is YES in the Computed Analysis, you MUST state: "A crossing was detected at t=[insert exact time from computed analysis] months." DO NOT HALLUCINATE A DIFFERENT TIME.
-
-OUTPUT FORMAT (JSON):
+OUTPUT (JSON only):
 {
   "decision": "separate" | "pooled",
-  "rationale": "2-3 sentences. MUST start with visual observation: 'The log-cumulative hazard plot shows [describe what you see]. A crossing is confirmed at t=[exact computed time] months.' [Conclusion]. DO NOT just report p-values."
+  "rationale": "<2 sentences describing what you see in plots>"
 }`;
 
-  // Ensure base64 strings are clean
   const cleanLogCumHaz = phPlots.log_cumulative_hazard.replace(/^data:image\/\w+;base64,/, '').trim();
   const cleanSchoenfeld = phPlots.schoenfeld_residuals.replace(/^data:image\/\w+;base64,/, '').trim();
 
@@ -228,15 +303,11 @@ OUTPUT FORMAT (JSON):
         { type: 'text', text: prompt },
         {
           type: 'image_url',
-          image_url: {
-            url: `data:image/png;base64,${cleanLogCumHaz}`,
-          },
+          image_url: { url: `data:image/png;base64,${cleanLogCumHaz}` },
         },
         {
           type: 'image_url',
-          image_url: {
-            url: `data:image/png;base64,${cleanSchoenfeld}`,
-          },
+          image_url: { url: `data:image/png;base64,${cleanSchoenfeld}` },
         },
       ],
     }),
@@ -246,7 +317,6 @@ OUTPUT FORMAT (JSON):
   const content = response.content as string;
 
   try {
-    // Extract JSON
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const result = JSON.parse(jsonMatch[0]);
@@ -255,12 +325,11 @@ OUTPUT FORMAT (JSON):
         rationale: result.rationale
       };
     }
-    throw new Error('No JSON found in response');
-  } catch (e) {
-    // Fallback
+    throw new Error('No JSON found');
+  } catch {
     return {
-      decision: 'separate', // Fail safe to separate models if analysis fails
-      rationale: 'Automated visual analysis failed; defaulting to separate models for flexibility.'
+      decision: 'separate',
+      rationale: 'Analysis failed; defaulting to separate models.'
     };
   }
 }
