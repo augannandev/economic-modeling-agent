@@ -1,5 +1,5 @@
 import { loadParquetData } from '../services/python-service';
-import { getDataDirectory } from '../lib/env';
+import { getDataDirectory, getPythonServiceUrl } from '../lib/env';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Load pseudo IPD data from parquet files
+ * Load pseudo IPD data from parquet files or fall back to demo data from Python service
  */
 export async function loadPseudoIPD(endpointType: 'OS' | 'PFS' = 'OS'): Promise<{
   chemo: { time: number[]; event: number[]; arm: string[] };
@@ -16,7 +16,7 @@ export async function loadPseudoIPD(endpointType: 'OS' | 'PFS' = 'OS'): Promise<
 }> {
   const dataDir = getDataDirectory();
 
-  // Try multiple path resolutions
+  // Try multiple path resolutions for local files
   const possibleRoots = [
     path.resolve(__dirname, '../../..'), // From server/src/tools
     path.resolve(__dirname, '../../../..'), // From server/src
@@ -37,21 +37,52 @@ export async function loadPseudoIPD(endpointType: 'OS' | 'PFS' = 'OS'): Promise<
     }
   }
 
-  if (!chemoPath || !pembroPath) {
-    // Fallback: try absolute path if dataDir is absolute
-    if (path.isAbsolute(dataDir)) {
-      chemoPath = path.join(dataDir, `ipd_EndpointType.${endpointType}_Chemotherapy.parquet`);
-      pembroPath = path.join(dataDir, `ipd_EndpointType.${endpointType}_Pembrolizumab.parquet`);
-    } else {
-      throw new Error(`Could not find parquet files in ${dataDir}. Checked paths: ${possibleRoots.map(r => path.join(r, dataDir)).join(', ')}`);
+  // If local files exist, use them
+  if (chemoPath && pembroPath) {
+    try {
+      const data = await loadParquetData(chemoPath, pembroPath);
+      console.log(`[DataLoader] Loaded local IPD data for ${endpointType}`);
+      return data;
+    } catch (error) {
+      console.warn(`[DataLoader] Failed to load local files, falling back to demo data: ${error}`);
     }
   }
 
+  // Fallback: Load demo data from Python service
+  console.log(`[DataLoader] Local IPD files not found, loading demo data from Python service for ${endpointType}`);
+  
   try {
-    const data = await loadParquetData(chemoPath, pembroPath);
-    return data;
-  } catch (error) {
-    throw new Error(`Failed to load pseudo IPD data: ${error instanceof Error ? error.message : String(error)}`);
+    const pythonServiceUrl = getPythonServiceUrl();
+    const response = await fetch(`${pythonServiceUrl}/demo-data/${endpointType}`);
+    
+    if (!response.ok) {
+      throw new Error(`Python service returned ${response.status}: ${await response.text()}`);
+    }
+    
+    const demoData = await response.json() as {
+      success: boolean;
+      chemo: { time: number[]; event: number[]; arm: string[] };
+      pembro: { time: number[]; event: number[]; arm: string[] };
+      message?: string;
+    };
+    
+    if (!demoData.success) {
+      throw new Error('Demo data request was not successful');
+    }
+    
+    console.log(`[DataLoader] Loaded demo data: ${demoData.message || 'success'}`);
+    
+    return {
+      chemo: demoData.chemo,
+      pembro: demoData.pembro,
+    };
+  } catch (fetchError) {
+    console.error(`[DataLoader] Failed to load demo data from Python service:`, fetchError);
+    throw new Error(
+      `Could not load IPD data. Local files not found in ${dataDir} and demo data fetch failed: ${
+        fetchError instanceof Error ? fetchError.message : String(fetchError)
+      }`
+    );
   }
 }
 

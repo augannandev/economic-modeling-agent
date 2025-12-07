@@ -61,6 +61,77 @@ class PlotRequest(BaseModel):
 async def root():
     return {"message": "Survival Analysis Service", "status": "running"}
 
+@app.get("/demo-data/{endpoint_type}")
+async def get_demo_data(endpoint_type: str = "OS"):
+    """
+    Load pre-packaged demo IPD data for survival analysis.
+    This provides working data for demos without requiring KM Digitizer flow.
+    
+    Args:
+        endpoint_type: "OS" or "PFS"
+    """
+    try:
+        import os
+        from pathlib import Path
+        
+        # Get the demo data directory (relative to this file)
+        demo_dir = Path(__file__).parent / "demo_data"
+        
+        chemo_path = demo_dir / f"ipd_EndpointType.{endpoint_type}_Chemotherapy.parquet"
+        pembro_path = demo_dir / f"ipd_EndpointType.{endpoint_type}_Pembrolizumab.parquet"
+        
+        if not chemo_path.exists() or not pembro_path.exists():
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Demo data not found for endpoint type: {endpoint_type}. Available: OS, PFS"
+            )
+        
+        from data_loader import load_parquet_files
+        chemo_data, pembro_data = load_parquet_files(str(chemo_path), str(pembro_path))
+        
+        return {
+            "success": True,
+            "endpoint_type": endpoint_type,
+            "chemo": chemo_data,
+            "pembro": pembro_data,
+            "source": "demo_data",
+            "message": f"Loaded demo {endpoint_type} data: {len(chemo_data['time'])} chemo patients, {len(pembro_data['time'])} pembro patients"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/demo-data")
+async def list_demo_data():
+    """List available demo data files"""
+    try:
+        import os
+        from pathlib import Path
+        
+        demo_dir = Path(__file__).parent / "demo_data"
+        
+        if not demo_dir.exists():
+            return {"available": [], "message": "No demo data directory found"}
+        
+        files = list(demo_dir.glob("*.parquet"))
+        
+        # Parse available endpoint types
+        endpoint_types = set()
+        for f in files:
+            # Parse: ipd_EndpointType.{TYPE}_{ARM}.parquet
+            parts = f.stem.split("_")
+            if len(parts) >= 2:
+                endpoint_types.add(parts[1].replace("EndpointType.", ""))
+        
+        return {
+            "available_endpoints": list(endpoint_types),
+            "files": [f.name for f in files],
+            "demo_dir": str(demo_dir)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/load-data")
 async def load_data(request: ParquetDataRequest):
     """Load parquet data files"""
