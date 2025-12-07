@@ -9,6 +9,12 @@ import { Settings } from '@/pages/Settings';
 import { Page1 } from '@/pages/Page1';
 import { Page2 } from '@/pages/Page2';
 import { SurvivalAnalysis } from '@/pages/SurvivalAnalysis';
+import { Projects } from '@/pages/Projects';
+import { ProjectCreate } from '@/pages/ProjectCreate';
+import { ProjectDetail } from '@/pages/ProjectDetail';
+import { KMDigitizer } from '@/pages/KMDigitizer';
+import { SLR } from '@/pages/SLR';
+import { NMA } from '@/pages/NMA';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import {
   SidebarProvider,
@@ -66,7 +72,13 @@ function AppContent() {
               <main className="flex-1">
                 <Routes>
                   <Route path="/" element={<Home />} />
+                  <Route path="/projects" element={<Projects />} />
+                  <Route path="/projects/new" element={<ProjectCreate />} />
+                  <Route path="/projects/:projectId" element={<ProjectDetail />} />
                   <Route path="/survival-analysis" element={<SurvivalAnalysis />} />
+                  <Route path="/digitizer" element={<KMDigitizer />} />
+                  <Route path="/slr" element={<SLR />} />
+                  <Route path="/nma" element={<NMA />} />
                   <Route path="/page1" element={<Page1 />} />
                   <Route path="/page2" element={<Page2 />} />
                   <Route path="/settings" element={<Settings />} />

@@ -1,3 +1,7 @@
+/* 
+ * Tailwind CSS v4 directives (@custom-variant, @theme, @apply, @layer) 
+ * are valid and required. Linter warnings about "unknown at rules" can be ignored.
+ */
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -10,71 +14,118 @@
   -moz-osx-font-smoothing: grayscale;
   --radius: 0.5rem;
   
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  /* Company Colors - Light Mode */
+  /* Primary: #356876 (Teal) */
+  --primary: oklch(0.45 0.08 200);
+  --primary-foreground: oklch(0.98 0 0);
+  
+  /* Accent: #dcb144 (Gold) */
+  --accent: oklch(0.75 0.12 85);
+  --accent-foreground: oklch(0.20 0 0);
+  
+  /* Foreground: #2d2d2d (Dark Gray) */
+  --foreground: oklch(0.20 0 0);
+  
+  /* Background: White/Off-white */
+  --background: oklch(0.99 0 0);
+  
+  /* Card backgrounds */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.20 0 0);
+  
+  /* Popover */
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.20 0 0);
+  
+  /* Secondary: Lighter teal */
+  --secondary: oklch(0.95 0.01 200);
+  --secondary-foreground: oklch(0.45 0.08 200);
+  
+  /* Muted: Light gray with teal tint */
+  --muted: oklch(0.96 0.005 200);
+  --muted-foreground: oklch(0.50 0.01 200);
+  
+  /* Destructive: Red */
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.705 0.015 286.067);
+  
+  /* Borders: Subtle gray */
+  --border: oklch(0.90 0.005 200);
+  --input: oklch(0.90 0.005 200);
+  --ring: oklch(0.45 0.08 200);
+  
+  /* Chart colors - using company palette */
+  --chart-1: oklch(0.45 0.08 200);
+  --chart-2: oklch(0.75 0.12 85);
+  --chart-3: oklch(0.50 0.06 220);
+  --chart-4: oklch(0.40 0.10 180);
+  --chart-5: oklch(0.70 0.10 90);
+  
+  /* Sidebar: #001c3c (Dark Blue) - consistent in both modes */
+  --sidebar: oklch(0.12 0.05 250);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.45 0.08 200);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  /* Active state: Use primary teal color for clear visibility */
+  --sidebar-accent: oklch(0.45 0.08 200);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.25 0.03 250);
+  --sidebar-ring: oklch(0.45 0.08 200);
 }
 
 .dark {
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
+  /* Dark Mode - using #001c3c (Dark Blue) as base */
+  --background: oklch(0.12 0.05 250);
+  --foreground: oklch(0.95 0 0);
+  
+  /* Cards: Slightly lighter than background */
+  --card: oklch(0.16 0.05 250);
+  --card-foreground: oklch(0.95 0 0);
+  
+  /* Popover */
+  --popover: oklch(0.16 0.05 250);
+  --popover-foreground: oklch(0.95 0 0);
+  
+  /* Primary: Teal - lighter for dark mode */
+  --primary: oklch(0.55 0.10 200);
+  --primary-foreground: oklch(0.12 0.05 250);
+  
+  /* Secondary: Darker teal */
+  --secondary: oklch(0.20 0.05 250);
+  --secondary-foreground: oklch(0.95 0 0);
+  
+  /* Muted: Dark gray-blue */
+  --muted: oklch(0.25 0.03 250);
+  --muted-foreground: oklch(0.70 0.01 200);
+  
+  /* Accent: Gold - slightly adjusted for dark mode */
+  --accent: oklch(0.70 0.12 85);
+  --accent-foreground: oklch(0.12 0.05 250);
+  
+  /* Destructive: Red */
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.552 0.016 285.938);
+  
+  /* Borders: Subtle with opacity */
+  --border: oklch(0.30 0.03 250);
+  --input: oklch(0.25 0.03 250);
+  --ring: oklch(0.55 0.10 200);
+  
+  /* Chart colors - adjusted for dark mode */
+  --chart-1: oklch(0.55 0.10 200);
+  --chart-2: oklch(0.70 0.12 85);
+  --chart-3: oklch(0.60 0.08 220);
+  --chart-4: oklch(0.50 0.12 180);
+  --chart-5: oklch(0.75 0.10 90);
+  
+  /* Sidebar: Same dark blue in both modes for consistency */
+  --sidebar: oklch(0.12 0.05 250);
+  --sidebar-foreground: oklch(0.95 0 0);
+  --sidebar-primary: oklch(0.55 0.10 200);
+  --sidebar-primary-foreground: oklch(0.12 0.05 250);
+  /* Active state: Use primary teal color for clear visibility */
+  --sidebar-accent: oklch(0.55 0.10 200);
+  --sidebar-accent-foreground: oklch(0.95 0 0);
+  --sidebar-border: oklch(0.25 0.03 250);
+  --sidebar-ring: oklch(0.55 0.10 200);
 }
 
 /* Smooth theme transitions - only on specific elements that need it */
@@ -136,5 +187,42 @@ button {
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+  
+  /* Typography enhancements */
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+  
+  h1 {
+    font-size: 2.25rem;
+    font-weight: 700;
+  }
+  
+  h2 {
+    font-size: 1.875rem;
+  }
+  
+  h3 {
+    font-size: 1.5rem;
+  }
+  
+  h4 {
+    font-size: 1.25rem;
+  }
+  
+  /* Ensure buttons and interactive elements use proper font weights */
+  button {
+    font-weight: 500;
+  }
+  
+  /* Sidebar styling for professional look */
+  [data-sidebar] {
+    font-weight: 500;
   }
 }

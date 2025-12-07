@@ -7,11 +7,23 @@ import { getDatabase, testDatabaseConnection } from './lib/db';
 import { setEnvContext, clearEnvContext, getDatabaseUrl } from './lib/env';
 import * as schema from './schema/users';
 import { analyses, models, visionAssessments, reasoningAssessments, plots, phTests, synthesisReports, tokenUsage } from './schema/analyses';
+import { projects } from './schema/projects';
+import { arms } from './schema/arms';
+import { endpoints } from './schema/endpoints';
+import { dataSources } from './schema/data-sources';
 import { runSurvivalAnalysisWorkflow } from './agents/survival-agent';
 import { eq, desc, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { streamSSE } from 'hono/streaming';
+import { 
+  createChatSession, 
+  getChatSession, 
+  addMessageToSession, 
+  ChatMessage 
+} from './lib/streaming';
+import { processChatMessage } from './tools/chat-agent';
 
 type Env = {
   RUNTIME?: string;
@@ -567,11 +579,691 @@ survivalRoutes.get('/token-usage/:analysisId', async (c) => {
   }
 });
 
+// Chat endpoints for real-time agent collaboration
+
+// Get chat history for an analysis
+survivalRoutes.get('/analyses/:id/chat/history', async (c) => {
+  try {
+    const user = c.get('user');
+    const analysisId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    // Verify analysis belongs to user
+    const [analysis] = await db.select()
+      .from(analyses)
+      .where(eq(analyses.id, analysisId));
+
+    if (!analysis || analysis.user_id !== user.id) {
+      return c.json({ error: 'Analysis not found' }, 404);
+    }
+
+    // Get or create chat session
+    let session = getChatSession(analysisId);
+    if (!session) {
+      session = createChatSession(analysisId, user.id);
+    }
+
+    return c.json({ messages: session.messages });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch chat history',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Send a message to the agent
+survivalRoutes.post('/analyses/:id/chat/message', async (c) => {
+  try {
+    const user = c.get('user');
+    const analysisId = c.req.param('id');
+    const { message } = await c.req.json();
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    // Verify analysis belongs to user
+    const [analysis] = await db.select()
+      .from(analyses)
+      .where(eq(analyses.id, analysisId));
+
+    if (!analysis || analysis.user_id !== user.id) {
+      return c.json({ error: 'Analysis not found' }, 404);
+    }
+
+    // Get or create chat session
+    let session = getChatSession(analysisId);
+    if (!session) {
+      session = createChatSession(analysisId, user.id);
+    }
+
+    // Add user message to session
+    const userMessage: ChatMessage = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: 'user_message',
+      content: message,
+      timestamp: new Date().toISOString(),
+    };
+    addMessageToSession(analysisId, userMessage);
+
+    // Process message with agent
+    try {
+      // Build chat history from session
+      const chatHistory = session.messages
+        .filter(msg => msg.type === 'user_message' || msg.type === 'agent_message')
+        .map(msg => ({
+          role: msg.type === 'user_message' ? 'user' as const : 'agent' as const,
+          content: msg.content,
+        }));
+
+      // Process with agent (non-streaming for now, can be enhanced later)
+      const result = await processChatMessage(analysisId, message, chatHistory);
+
+      // Add agent response to session
+      const agentMessage: ChatMessage = {
+        id: `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'agent_message',
+        content: result.response,
+        timestamp: new Date().toISOString(),
+        // Note: token usage tracked separately, not in metadata
+      };
+      addMessageToSession(analysisId, agentMessage);
+
+      return c.json({ 
+        success: true, 
+        message: 'Message sent',
+        response: agentMessage 
+      });
+    } catch (agentError) {
+      console.error('Chat agent error:', agentError);
+      
+      // Fallback response
+      const fallbackMessage: ChatMessage = {
+        id: `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'agent_message',
+        content: `I encountered an error processing your message. Please try again or rephrase your question. If the problem persists, the analysis may still be loading data.`,
+        timestamp: new Date().toISOString(),
+      };
+      addMessageToSession(analysisId, fallbackMessage);
+
+      return c.json({ 
+        success: true, 
+        message: 'Message sent (with fallback response)',
+        response: fallbackMessage 
+      });
+    }
+  } catch (error) {
+    console.error('Error in chat message endpoint:', error);
+    return c.json({
+      error: 'Failed to send message',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// SSE stream for real-time chat updates
+survivalRoutes.get('/analyses/:id/chat/stream', async (c) => {
+  const analysisId = c.req.param('id');
+  
+  // Note: SSE endpoints need special handling for auth
+  // For now, we'll rely on the session being valid
+  
+  return streamSSE(c, async (stream) => {
+    // Send initial connection message
+    await stream.writeSSE({
+      data: JSON.stringify({
+        id: `system_${Date.now()}`,
+        type: 'status_update',
+        content: 'Connected to chat stream',
+        timestamp: new Date().toISOString(),
+      }),
+      event: 'status_update',
+    });
+
+    // Get existing messages
+    const session = getChatSession(analysisId);
+    if (session) {
+      for (const msg of session.messages) {
+        await stream.writeSSE({
+          data: JSON.stringify(msg),
+          event: msg.type,
+          id: msg.id,
+        });
+      }
+    }
+
+    // Keep connection alive with heartbeat
+    const heartbeatInterval = setInterval(async () => {
+      try {
+        await stream.writeSSE({
+          data: JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }),
+          event: 'heartbeat',
+        });
+      } catch {
+        clearInterval(heartbeatInterval);
+      }
+    }, 30000);
+
+    // Clean up on disconnect
+    stream.onAbort(() => {
+      clearInterval(heartbeatInterval);
+    });
+
+    // Keep stream open
+    await new Promise(() => {});
+  });
+});
+
 // Mount survival routes
 api.route('/survival', survivalRoutes);
 
+// Project routes
+const projectRoutes = new Hono();
+projectRoutes.use('*', authMiddleware);
+
+// List projects
+projectRoutes.get('/', async (c) => {
+  try {
+    const user = c.get('user');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const results = await db.select()
+      .from(projects)
+      .where(eq(projects.user_id, user.id))
+      .orderBy(desc(projects.created_at));
+
+    return c.json({ projects: results });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch projects',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Get single project
+projectRoutes.get('/:id', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    return c.json({ project });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch project',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Create project
+projectRoutes.post('/', async (c) => {
+  try {
+    const user = c.get('user');
+    const body = await c.req.json();
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const projectId = randomUUID();
+    await db.insert(projects).values({
+      id: projectId,
+      user_id: user.id,
+      name: body.name,
+      description: body.description,
+      therapeutic_area: body.therapeutic_area,
+      disease_condition: body.disease_condition,
+      intervention: body.intervention,
+      comparator: body.comparator,
+      status: 'draft',
+    });
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    return c.json({ project });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to create project',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Update project
+projectRoutes.patch('/:id', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const body = await c.req.json();
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    await db.update(projects)
+      .set({
+        ...body,
+        updated_at: new Date(),
+      })
+      .where(eq(projects.id, projectId));
+
+    const [updated] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    return c.json({ project: updated });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to update project',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Delete project
+projectRoutes.delete('/:id', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    await db.delete(projects).where(eq(projects.id, projectId));
+
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to delete project',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// List arms for a project
+projectRoutes.get('/:id/arms', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    const armsList = await db.select()
+      .from(arms)
+      .where(eq(arms.project_id, projectId))
+      .orderBy(arms.display_order);
+
+    return c.json({ arms: armsList });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch arms',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Create arm
+projectRoutes.post('/:id/arms', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const body = await c.req.json();
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    const armId = randomUUID();
+    await db.insert(arms).values({
+      id: armId,
+      project_id: projectId,
+      name: body.name,
+      arm_type: body.arm_type || 'treatment',
+      label: body.label,
+      color: body.color,
+      drug_name: body.drug_name,
+      dosage: body.dosage,
+      regimen: body.regimen,
+      sample_size: body.sample_size,
+    });
+
+    const [arm] = await db.select()
+      .from(arms)
+      .where(eq(arms.id, armId));
+
+    return c.json({ arm });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to create arm',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Delete arm
+projectRoutes.delete('/:id/arms/:armId', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const armId = c.req.param('armId');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    await db.delete(arms).where(eq(arms.id, armId));
+
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to delete arm',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// List endpoints for a project
+projectRoutes.get('/:id/endpoints', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    const endpointsList = await db.select()
+      .from(endpoints)
+      .where(eq(endpoints.project_id, projectId))
+      .orderBy(endpoints.display_order);
+
+    return c.json({ endpoints: endpointsList });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch endpoints',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Create endpoint
+projectRoutes.post('/:id/endpoints', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const body = await c.req.json();
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    const endpointId = randomUUID();
+    await db.insert(endpoints).values({
+      id: endpointId,
+      project_id: projectId,
+      endpoint_type: body.endpoint_type,
+      custom_name: body.custom_name,
+      description: body.description,
+      time_horizon: body.time_horizon || 240,
+    });
+
+    const [endpoint] = await db.select()
+      .from(endpoints)
+      .where(eq(endpoints.id, endpointId));
+
+    return c.json({ endpoint });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to create endpoint',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Delete endpoint
+projectRoutes.delete('/:id/endpoints/:endpointId', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const endpointId = c.req.param('endpointId');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    await db.delete(endpoints).where(eq(endpoints.id, endpointId));
+
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to delete endpoint',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// List data sources for a project
+projectRoutes.get('/:id/data-sources', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    const dataSourcesList = await db.select()
+      .from(dataSources)
+      .where(eq(dataSources.project_id, projectId));
+
+    return c.json({ data_sources: dataSourcesList });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to fetch data sources',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Delete data source
+projectRoutes.delete('/:id/data-sources/:dataSourceId', async (c) => {
+  try {
+    const user = c.get('user');
+    const projectId = c.req.param('id');
+    const dataSourceId = c.req.param('dataSourceId');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    const [project] = await db.select()
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    if (!project || project.user_id !== user.id) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    await db.delete(dataSources).where(eq(dataSources.id, dataSourceId));
+
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to delete data source',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Mount project routes
+api.route('/projects', projectRoutes);
+
 // Mount the protected routes under /protected
 api.route('/protected', protectedRoutes);
+
+// ============================================================================
+// DIGITIZER ROUTES - KM Curve Extraction and IPD Generation
+// ============================================================================
+
+import { 
+  extractKMCurve, 
+  generatePseudoIPD, 
+  validateKMData,
+  type IPDGenerationRequest 
+} from './services/digitizer-service';
+
+const digitizerRoutes = new Hono();
+
+// Apply auth middleware to all digitizer routes
+digitizerRoutes.use('*', authMiddleware);
+
+// Extract KM curve from image
+digitizerRoutes.post('/extract', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { imageBase64, riskTableImageBase64, endpointType, arm, granularity, apiProvider } = body;
+
+    if (!imageBase64) {
+      return c.json({ error: 'Image data is required' }, 400);
+    }
+
+    console.log(`[Digitizer API] Extraction request for ${endpointType} - ${arm}, granularity: ${granularity || 0.25}`);
+
+    const result = await extractKMCurve(
+      imageBase64,
+      riskTableImageBase64,
+      endpointType,
+      arm,
+      granularity,
+      apiProvider
+    );
+
+    if (!result.success) {
+      return c.json({ error: result.error || 'Extraction failed' }, 500);
+    }
+
+    return c.json(result);
+  } catch (error) {
+    console.error('Extraction error:', error);
+    return c.json({
+      error: 'Failed to extract KM curve',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Validate KM data
+digitizerRoutes.post('/validate', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { points, riskTable } = body;
+
+    if (!points || !riskTable) {
+      return c.json({ error: 'Points and risk table are required' }, 400);
+    }
+
+    const validation = validateKMData(points, riskTable);
+    return c.json(validation);
+  } catch (error) {
+    console.error('Validation error:', error);
+    return c.json({
+      error: 'Failed to validate data',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Generate Pseudo-IPD from KM data
+digitizerRoutes.post('/generate-ipd', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { endpoints } = body as { endpoints: IPDGenerationRequest[] };
+
+    if (!endpoints || endpoints.length === 0) {
+      return c.json({ error: 'At least one endpoint is required' }, 400);
+    }
+
+    // Validate each endpoint's data
+    for (const endpoint of endpoints) {
+      const validation = validateKMData(endpoint.points, endpoint.riskTable);
+      if (!validation.valid) {
+        return c.json({
+          error: `Validation failed for ${endpoint.endpointType} - ${endpoint.arm}`,
+          details: validation.errors,
+        }, 400);
+      }
+    }
+
+    const result = await generatePseudoIPD(endpoints);
+
+    if (!result.success) {
+      return c.json({ error: result.error || 'IPD generation failed' }, 500);
+    }
+
+    return c.json(result);
+  } catch (error) {
+    console.error('IPD generation error:', error);
+    return c.json({
+      error: 'Failed to generate Pseudo-IPD',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Mount digitizer routes
+api.route('/digitizer', digitizerRoutes);
 
 // Mount the API router
 app.route('/api/v1', api);

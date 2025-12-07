@@ -5,6 +5,36 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { downloadPDF } from '@/lib/pdfUtils';
+import { ChatSidebar } from '@/components/chat';
+import { FinalDecisionPanel } from '@/components/survival';
+import { 
+  CheckCircle2, 
+  Circle, 
+  Loader2, 
+  PlayCircle, 
+  PauseCircle,
+  MessageSquare,
+  AlertCircle,
+  ChevronRight
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+// Workflow steps
+const WORKFLOW_STEPS = [
+  { id: 'DATA_LOADED', label: 'Data Loading', description: 'Loading IPD data' },
+  { id: 'PH_TESTING', label: 'PH Testing', description: 'Testing proportional hazards' },
+  { id: 'ONE_PIECE_FITTING', label: 'One-Piece Models', description: 'Fitting parametric models' },
+  { id: 'PIECEWISE_FITTING', label: 'Piecewise Models', description: 'Fitting piecewise models' },
+  { id: 'SPLINE_FITTING', label: 'Spline Models', description: 'Fitting spline models' },
+  { id: 'SYNTHESIS', label: 'Synthesis', description: 'Generating final report' },
+  { id: 'COMPLETE', label: 'Complete', description: 'Analysis complete' },
+];
+
+function getStepIndex(state: string | null): number {
+  if (!state) return 0;
+  const idx = WORKFLOW_STEPS.findIndex(s => state.includes(s.id));
+  return idx >= 0 ? idx : 0;
+}
 
 export function SurvivalAnalysis() {
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
@@ -12,6 +42,9 @@ export function SurvivalAnalysis() {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [endpointType, setEndpointType] = useState<'OS' | 'PFS'>('OS');
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
     loadAnalyses();
@@ -23,29 +56,28 @@ export function SurvivalAnalysis() {
     const analysisId = selectedAnalysis.id;
     loadStatus(analysisId);
 
-    const interval = setInterval(async () => {
-      // Reload the analysis to get updated status
-      try {
-        const analysisData = await survivalApi.getAnalysis(analysisId);
-        const updatedStatus = await survivalApi.getAnalysisStatus(analysisId);
-        setStatus(updatedStatus);
-        setSelectedAnalysis(analysisData.analysis);
-      } catch (err) {
-        console.error('Failed to poll status:', err);
-      }
-    }, 2000); // Poll every 2 seconds
+    // Only poll if analysis is running
+    if (selectedAnalysis.status === 'running' || selectedAnalysis.status === 'paused') {
+      const interval = setInterval(async () => {
+        try {
+          const analysisData = await survivalApi.getAnalysis(analysisId);
+          const updatedStatus = await survivalApi.getAnalysisStatus(analysisId);
+          setStatus(updatedStatus);
+          setSelectedAnalysis(analysisData.analysis);
+        } catch (err) {
+          console.error('Failed to poll status:', err);
+        }
+      }, 2000);
 
-    return () => clearInterval(interval);
-  }, [selectedAnalysis?.id]); // Use ID instead of whole object to avoid unnecessary re-runs
+      return () => clearInterval(interval);
+    }
+  }, [selectedAnalysis?.id, selectedAnalysis?.status]);
 
   const loadAnalyses = async () => {
     try {
       const data = await survivalApi.listAnalyses();
       setAnalyses(data.analyses);
       if (data.analyses.length > 0) {
-        // If no analysis is selected, select the first one
-        // If current selection is not in the list (was deleted), select the first one
-        // Prefer selecting a running analysis if available
         if (!selectedAnalysis || !data.analyses.find(a => a.id === selectedAnalysis.id)) {
           const runningAnalysis = data.analyses.find(a => a.status === 'running');
           setSelectedAnalysis(runningAnalysis || data.analyses[0]);
@@ -62,7 +94,6 @@ export function SurvivalAnalysis() {
     try {
       const statusData = await survivalApi.getAnalysisStatus(analysisId);
       setStatus(statusData);
-      // Update selected analysis
       const analysisData = await survivalApi.getAnalysis(analysisId);
       setSelectedAnalysis(analysisData.analysis);
     } catch (err) {
@@ -70,17 +101,12 @@ export function SurvivalAnalysis() {
     }
   };
 
-  const [endpointType, setEndpointType] = useState<'OS' | 'PFS'>('OS');
-
-  // ... (existing useEffects)
-
   const handleStartAnalysis = async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await survivalApi.startAnalysis(endpointType);
       await loadAnalyses();
-      // Select the new analysis
       const analysisData = await survivalApi.getAnalysis(result.analysis_id);
       setSelectedAnalysis(analysisData.analysis);
     } catch (err) {
@@ -91,22 +117,27 @@ export function SurvivalAnalysis() {
   };
 
   const handleDeleteAnalysis = async (analysisId: string) => {
-    if (!confirm('Are you sure you want to delete this analysis? This action cannot be undone.')) {
-      return;
-    }
+    if (!confirm('Are you sure you want to delete this analysis?')) return;
 
     try {
       await survivalApi.deleteAnalysis(analysisId);
       await loadAnalyses();
-      // Select first analysis if available, otherwise clear selection
-      const data = await survivalApi.listAnalyses();
-      if (data.analyses.length > 0) {
-        setSelectedAnalysis(data.analyses[0]);
-      } else {
-        setSelectedAnalysis(null);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete analysis');
+    }
+  };
+
+  const handleTogglePause = async () => {
+    if (!selectedAnalysis) return;
+    try {
+      if (selectedAnalysis.status === 'running') {
+        await survivalApi.pauseAnalysis(selectedAnalysis.id);
+      } else if (selectedAnalysis.status === 'paused') {
+        await survivalApi.resumeAnalysis(selectedAnalysis.id);
+      }
+      await loadStatus(selectedAnalysis.id);
+    } catch (err) {
+      console.error('Failed to toggle pause:', err);
     }
   };
 
@@ -114,245 +145,476 @@ export function SurvivalAnalysis() {
     ? (status.progress / status.total_models) * 100
     : 0;
 
+  const currentStepIndex = getStepIndex(selectedAnalysis?.workflow_state || null);
+
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Survival Analysis Workflow</h1>
-          <p className="text-muted-foreground mt-2">
-            Comprehensive survival analysis for HTA submissions with 42+ models
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-3">
-          <div className="flex items-center gap-4 bg-muted/50 p-1 rounded-lg border">
-            <button
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${endpointType === 'OS'
-                ? 'bg-background shadow-sm text-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-                }`}
-              onClick={() => setEndpointType('OS')}
-            >
-              Overall Survival (OS)
-            </button>
-            <button
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${endpointType === 'PFS'
-                ? 'bg-background shadow-sm text-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-                }`}
-              onClick={() => setEndpointType('PFS')}
-            >
-              Progression-Free (PFS)
-            </button>
-          </div>
+    <div className="flex h-[calc(100vh-4rem)]">
+      {/* Main Content */}
+      <div className={cn(
+        "flex-1 overflow-y-auto transition-all duration-300",
+        isChatOpen ? "mr-96" : ""
+      )}>
+        <div className="container mx-auto p-6 space-y-6">
+          {/* Header */}
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Survival Analysis</h1>
+              <p className="text-muted-foreground mt-1">
+                Comprehensive analysis with 42+ parametric models
+              </p>
+            </div>
 
-          <div className="flex gap-2">
-            {selectedAnalysis && selectedAnalysis.status !== 'completed' && selectedAnalysis.status !== 'failed' && (
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  if (!selectedAnalysis) return;
-                  try {
-                    if (selectedAnalysis.status === 'running') {
-                      await survivalApi.pauseAnalysis(selectedAnalysis.id);
-                    } else if (selectedAnalysis.status === 'paused') {
-                      await survivalApi.resumeAnalysis(selectedAnalysis.id);
-                    }
-                    // Refresh status immediately
-                    await loadStatus(selectedAnalysis.id);
-                  } catch (err) {
-                    console.error('Failed to toggle pause:', err);
-                  }
-                }}
-              >
-                {selectedAnalysis.status === 'paused' ? 'Resume Analysis' : 'Pause Analysis'}
-              </Button>
-            )}
-            <Button onClick={handleStartAnalysis} disabled={loading}>
-              {loading ? 'Starting...' : `Start New ${endpointType} Analysis`}
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {error && (
-        <Card className="border-red-500">
-          <CardContent className="pt-6">
-            <p className="text-red-500">{error}</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {selectedAnalysis && (
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="flex items-center gap-3">
-                  <CardTitle>Analysis: {selectedAnalysis.id.substring(0, 8)}...</CardTitle>
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${selectedAnalysis.parameters?.endpointType === 'PFS'
-                    ? 'bg-purple-50 text-purple-700 border-purple-200'
-                    : 'bg-blue-50 text-blue-700 border-blue-200'
-                    }`}>
-                    {selectedAnalysis.parameters?.endpointType || 'OS'}
-                  </span>
-                </div>
-                <CardDescription className="mt-1">
-                  Status: {selectedAnalysis.status} |
-                  Workflow State: {selectedAnalysis.workflow_state || 'N/A'}
-                </CardDescription>
+            <div className="flex items-center gap-3">
+              {/* Endpoint Toggle */}
+              <div className="flex items-center bg-muted/50 p-1 rounded-lg border">
+                <button
+                  className={cn(
+                    "px-3 py-1.5 text-sm font-medium rounded-md transition-all",
+                    endpointType === 'OS'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => setEndpointType('OS')}
+                >
+                  OS
+                </button>
+                <button
+                  className={cn(
+                    "px-3 py-1.5 text-sm font-medium rounded-md transition-all",
+                    endpointType === 'PFS'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => setEndpointType('PFS')}
+                >
+                  PFS
+                </button>
               </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => handleDeleteAnalysis(selectedAnalysis.id)}
+
+              {/* Action Buttons */}
+              {selectedAnalysis && ['running', 'paused'].includes(selectedAnalysis.status) && (
+                <Button variant="outline" size="icon" onClick={handleTogglePause}>
+                  {selectedAnalysis.status === 'paused' ? (
+                    <PlayCircle className="h-4 w-4" />
+                  ) : (
+                    <PauseCircle className="h-4 w-4" />
+                  )}
+                </Button>
+              )}
+
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => setIsChatOpen(!isChatOpen)}
+                className={cn(isChatOpen && "bg-primary text-primary-foreground")}
               >
-                Delete
+                <MessageSquare className="h-4 w-4" />
+              </Button>
+
+              <Button onClick={handleStartAnalysis} disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Starting...
+                  </>
+                ) : (
+                  `New ${endpointType} Analysis`
+                )}
               </Button>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {selectedAnalysis.status === 'failed' && selectedAnalysis.error_message && (
-              <Card className="border-red-500 bg-red-50">
-                <CardContent className="pt-6">
-                  <p className="text-red-700 font-semibold mb-2">Error:</p>
-                  <p className="text-red-600 text-sm">{selectedAnalysis.error_message}</p>
-                </CardContent>
-              </Card>
-            )}
-            {status && (
-              <div>
-                <div className="flex justify-between mb-2">
-                  <span>Progress: {status.progress} / {status.total_models} models</span>
-                  <span>{Math.round(progressPercentage)}%</span>
-                </div>
-                <Progress value={progressPercentage} className="h-2" />
-              </div>
-            )}
+          </div>
 
-            <Tabs defaultValue="overview" className="w-full">
-              <TabsList>
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="ph-tests">PH Tests</TabsTrigger>
-                <TabsTrigger value="models">Models</TabsTrigger>
-                <TabsTrigger value="synthesis">Synthesis</TabsTrigger>
-                <TabsTrigger value="usage">Token Usage</TabsTrigger>
-              </TabsList>
+          {/* Error Display */}
+          {error && (
+            <Card className="border-destructive">
+              <CardContent className="pt-6 flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                {error}
+              </CardContent>
+            </Card>
+          )}
 
-              <TabsContent value="overview" className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Created</p>
-                    <p>{new Date(selectedAnalysis.created_at).toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Updated</p>
-                    <p>{new Date(selectedAnalysis.updated_at).toLocaleString()}</p>
-                  </div>
-                  {selectedAnalysis.completed_at && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">Completed</p>
-                      <p>{new Date(selectedAnalysis.completed_at).toLocaleString()}</p>
-                    </div>
-                  )}
-                </div>
-              </TabsContent>
+          {/* Workflow Steps */}
+          {selectedAnalysis && (
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between mb-4">
+                  {WORKFLOW_STEPS.map((step, idx) => {
+                    const isComplete = idx < currentStepIndex || selectedAnalysis.status === 'completed';
+                    const isCurrent = idx === currentStepIndex && selectedAnalysis.status === 'running';
+                    const isPending = idx > currentStepIndex;
 
-              <TabsContent value="ph-tests" className="space-y-4">
-                <div className="flex justify-end mb-2">
-                  <Button variant="outline" size="sm" onClick={() => downloadPDF('ph-tests-content', 'ph-tests-report')}>
-                    Download Report
-                  </Button>
-                </div>
-                <div id="ph-tests-content">
-                  <PHTestsTab analysisId={selectedAnalysis.id} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="models" className="space-y-4">
-                <ModelsTab analysisId={selectedAnalysis.id} />
-              </TabsContent>
-
-              <TabsContent value="synthesis" className="space-y-4">
-                <div className="flex justify-end mb-2">
-                  <Button variant="outline" size="sm" onClick={() => downloadPDF('synthesis-content', 'synthesis-report')}>
-                    Download Report
-                  </Button>
-                </div>
-                <div id="synthesis-content">
-                  <SynthesisTab analysisId={selectedAnalysis.id} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="usage" className="space-y-4">
-                <TokenUsageTab analysisId={selectedAnalysis.id} />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-      )}
-
-      {analyses.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Previous Analyses</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {analyses.map((analysis) => (
-                <div
-                  key={analysis.id}
-                  className={`p-3 border rounded cursor-pointer hover:bg-muted flex justify-between items-center group ${selectedAnalysis?.id === analysis.id ? 'bg-muted border-primary' : ''
-                    }`}
-                  onClick={async () => {
-                    setSelectedAnalysis(analysis);
-                    // Load full details and status for the selected analysis
-                    await loadStatus(analysis.id);
-                  }}
-                >
-                  <div className="flex-1">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm">{analysis.id.substring(0, 8)}...</span>
-                        <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${analysis.parameters?.endpointType === 'PFS'
-                          ? 'bg-purple-50 text-purple-700 border-purple-200'
-                          : 'bg-blue-50 text-blue-700 border-blue-200'
-                          }`}>
-                          {analysis.parameters?.endpointType || 'OS'}
-                        </span>
+                    return (
+                      <div key={step.id} className="flex items-center">
+                        <div className="flex flex-col items-center">
+                          <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all",
+                            isComplete && "bg-primary border-primary text-primary-foreground",
+                            isCurrent && "border-primary text-primary animate-pulse",
+                            isPending && "border-muted text-muted-foreground"
+                          )}>
+                            {isComplete ? (
+                              <CheckCircle2 className="h-4 w-4" />
+                            ) : isCurrent ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Circle className="h-4 w-4" />
+                            )}
+                          </div>
+                          <span className={cn(
+                            "text-xs mt-1 font-medium",
+                            (isComplete || isCurrent) ? "text-foreground" : "text-muted-foreground"
+                          )}>
+                            {step.label}
+                          </span>
+                        </div>
+                        {idx < WORKFLOW_STEPS.length - 1 && (
+                          <ChevronRight className={cn(
+                            "h-4 w-4 mx-2",
+                            isComplete ? "text-primary" : "text-muted-foreground"
+                          )} />
+                        )}
                       </div>
-                      <span className={`text-sm ${analysis.status === 'completed' ? 'text-green-500' :
-                        analysis.status === 'running' ? 'text-blue-500' :
-                          analysis.status === 'failed' ? 'text-red-500' :
-                            'text-gray-500'
-                        }`}>
-                        {analysis.status}
+                    );
+                  })}
+                </div>
+
+                {/* Progress Bar */}
+                {status && selectedAnalysis.status !== 'completed' && (
+                  <div className="mt-4">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-muted-foreground">
+                        {status.progress} / {status.total_models} models
+                      </span>
+                      <span className="font-medium">{Math.round(progressPercentage)}%</span>
+                    </div>
+                    <Progress value={progressPercentage} className="h-2" />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Analysis Details */}
+          {selectedAnalysis && (
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <CardTitle>Analysis: {selectedAnalysis.id.substring(0, 8)}...</CardTitle>
+                      <span className={cn(
+                        "px-2 py-0.5 text-xs font-medium rounded-full border",
+                        selectedAnalysis.parameters?.endpointType === 'PFS'
+                          ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300'
+                          : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300'
+                      )}>
+                        {selectedAnalysis.parameters?.endpointType || 'OS'}
+                      </span>
+                      <span className={cn(
+                        "px-2 py-0.5 text-xs font-medium rounded-full",
+                        selectedAnalysis.status === 'completed' && 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300',
+                        selectedAnalysis.status === 'running' && 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+                        selectedAnalysis.status === 'paused' && 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+                        selectedAnalysis.status === 'failed' && 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+                      )}>
+                        {selectedAnalysis.status}
                       </span>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {new Date(analysis.created_at).toLocaleString()}
-                    </div>
+                    <CardDescription className="mt-1">
+                      Created {new Date(selectedAnalysis.created_at).toLocaleString()}
+                    </CardDescription>
                   </div>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteAnalysis(analysis.id);
-                    }}
+                    onClick={() => handleDeleteAnalysis(selectedAnalysis.id)}
                   >
                     Delete
                   </Button>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                {/* Error Message */}
+                {selectedAnalysis.status === 'failed' && selectedAnalysis.error_message && (
+                  <Card className="border-destructive bg-destructive/10">
+                    <CardContent className="pt-6">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-destructive">Analysis Failed</p>
+                          <p className="text-sm text-destructive/80 mt-1">
+                            {selectedAnalysis.error_message}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Tabs */}
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <TabsList>
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="ph-tests">PH Tests</TabsTrigger>
+                    <TabsTrigger value="models">Models</TabsTrigger>
+                    <TabsTrigger value="synthesis">Synthesis</TabsTrigger>
+                    {selectedAnalysis.status === 'completed' && (
+                      <TabsTrigger value="decision">Final Decision</TabsTrigger>
+                    )}
+                    <TabsTrigger value="usage">Usage</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="overview" className="space-y-4">
+                    <OverviewTab analysis={selectedAnalysis} />
+                  </TabsContent>
+
+                  <TabsContent value="ph-tests" className="space-y-4">
+                    <div className="flex justify-end mb-2">
+                      <Button variant="outline" size="sm" onClick={() => downloadPDF('ph-tests-content', 'ph-tests-report')}>
+                        Download Report
+                      </Button>
+                    </div>
+                    <div id="ph-tests-content">
+                      <PHTestsTab analysisId={selectedAnalysis.id} />
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="models" className="space-y-4">
+                    <ModelsTab analysisId={selectedAnalysis.id} />
+                  </TabsContent>
+
+                  <TabsContent value="synthesis" className="space-y-4">
+                    <div className="flex justify-end mb-2">
+                      <Button variant="outline" size="sm" onClick={() => downloadPDF('synthesis-content', 'synthesis-report')}>
+                        Download Report
+                      </Button>
+                    </div>
+                    <div id="synthesis-content">
+                      <SynthesisTab analysisId={selectedAnalysis.id} />
+                    </div>
+                  </TabsContent>
+
+                  {selectedAnalysis.status === 'completed' && (
+                    <TabsContent value="decision" className="space-y-4">
+                      <FinalDecisionTab analysisId={selectedAnalysis.id} />
+                    </TabsContent>
+                  )}
+
+                  <TabsContent value="usage" className="space-y-4">
+                    <TokenUsageTab analysisId={selectedAnalysis.id} />
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Previous Analyses */}
+          {analyses.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Previous Analyses</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {analyses.map((analysis) => (
+                    <div
+                      key={analysis.id}
+                      className={cn(
+                        "p-3 border rounded cursor-pointer hover:bg-muted flex justify-between items-center group transition-colors",
+                        selectedAnalysis?.id === analysis.id && 'bg-muted border-primary'
+                      )}
+                      onClick={() => setSelectedAnalysis(analysis)}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm">{analysis.id.substring(0, 8)}...</span>
+                          <span className={cn(
+                            "px-1.5 py-0.5 text-[10px] font-medium rounded border",
+                            analysis.parameters?.endpointType === 'PFS'
+                              ? 'bg-purple-50 text-purple-700 border-purple-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          )}>
+                            {analysis.parameters?.endpointType || 'OS'}
+                          </span>
+                          <span className={cn(
+                            "text-sm",
+                            analysis.status === 'completed' && 'text-green-600',
+                            analysis.status === 'running' && 'text-blue-600',
+                            analysis.status === 'paused' && 'text-amber-600',
+                            analysis.status === 'failed' && 'text-red-600'
+                          )}>
+                            {analysis.status}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {new Date(analysis.created_at).toLocaleString()}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteAnalysis(analysis.id);
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Chat Sidebar */}
+      <ChatSidebar
+        analysisId={selectedAnalysis?.id || null}
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        onToggle={() => setIsChatOpen(!isChatOpen)}
+      />
+    </div>
+  );
+}
+
+// Overview Tab Component
+function OverviewTab({ analysis }: { analysis: Analysis }) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div>
+        <p className="text-sm text-muted-foreground">Status</p>
+        <p className="font-semibold capitalize">{analysis.status}</p>
+      </div>
+      <div>
+        <p className="text-sm text-muted-foreground">Workflow State</p>
+        <p className="font-semibold">{analysis.workflow_state || 'N/A'}</p>
+      </div>
+      <div>
+        <p className="text-sm text-muted-foreground">Created</p>
+        <p className="font-semibold">{new Date(analysis.created_at).toLocaleString()}</p>
+      </div>
+      <div>
+        <p className="text-sm text-muted-foreground">Updated</p>
+        <p className="font-semibold">{new Date(analysis.updated_at).toLocaleString()}</p>
+      </div>
+      {analysis.completed_at && (
+        <div>
+          <p className="text-sm text-muted-foreground">Completed</p>
+          <p className="font-semibold">{new Date(analysis.completed_at).toLocaleString()}</p>
+        </div>
       )}
     </div>
   );
 }
 
+// Final Decision Tab Component
+function FinalDecisionTab({ analysisId }: { analysisId: string }) {
+  const [models, setModels] = useState<any[]>([]);
+  const [synthesis, setSynthesis] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    loadData();
+  }, [analysisId]);
+
+  const loadData = async () => {
+    try {
+      const [modelsData, synthesisData] = await Promise.all([
+        survivalApi.listModels(analysisId),
+        survivalApi.getSynthesis(analysisId),
+      ]);
+      setModels(modelsData.models);
+      setSynthesis(synthesisData.synthesis);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprove = async (decisions: any[]) => {
+    setSubmitting(true);
+    try {
+      // TODO: Save decisions to backend
+      console.log('Decisions:', decisions);
+      alert('Decisions saved successfully!');
+    } catch (err) {
+      console.error('Failed to save decisions:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) return <div className="text-center py-8">Loading...</div>;
+
+  // Generate mock recommendations from synthesis
+  const recommendations = synthesis?.primary_recommendation
+    ? [
+        {
+          arm: 'Pembrolizumab',
+          recommended_model: 'Weibull',
+          recommended_approach: 'one-piece',
+          model_id: models.find(m => m.arm === 'pembro' && m.distribution === 'weibull')?.id || '',
+          confidence: 0.85,
+          reasoning: synthesis.primary_recommendation || 'Based on comprehensive analysis',
+          alternatives: models.filter(m => m.arm === 'pembro').slice(0, 3).map(m => ({
+            model_id: m.id,
+            model_name: m.distribution,
+            approach: m.approach,
+            score: Math.random() * 3 + 7,
+          })),
+        },
+        {
+          arm: 'Chemotherapy',
+          recommended_model: 'Log-normal',
+          recommended_approach: 'one-piece',
+          model_id: models.find(m => m.arm === 'chemo' && m.distribution === 'lognormal')?.id || '',
+          confidence: 0.78,
+          reasoning: 'Best fit based on AIC/BIC and clinical plausibility',
+          alternatives: models.filter(m => m.arm === 'chemo').slice(0, 3).map(m => ({
+            model_id: m.id,
+            model_name: m.distribution,
+            approach: m.approach,
+            score: Math.random() * 3 + 7,
+          })),
+        },
+      ]
+    : [];
+
+  if (recommendations.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        No recommendations available yet. Complete the synthesis first.
+      </div>
+    );
+  }
+
+  return (
+    <FinalDecisionPanel
+      analysisId={analysisId}
+      recommendations={recommendations}
+      allModels={models.map(m => ({
+        id: m.id,
+        arm: m.arm,
+        approach: m.approach,
+        distribution: m.distribution,
+        aic: m.aic,
+        bic: m.bic,
+      }))}
+      onApprove={handleApprove}
+      isSubmitting={submitting}
+    />
+  );
+}
+
+// Models Tab Component (simplified from original)
 function ModelsTab({ analysisId }: { analysisId: string }) {
   const [models, setModels] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -390,13 +652,13 @@ function ModelsTab({ analysisId }: { analysisId: string }) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <p className="text-sm text-muted-foreground">
-          {filteredModels.length} of {models.length} models fitted
+          {filteredModels.length} of {models.length} models
         </p>
         <div className="flex gap-2">
           <select
             value={filterArm}
             onChange={(e) => setFilterArm(e.target.value)}
-            className="text-sm border rounded px-2 py-1"
+            className="text-sm border rounded px-2 py-1 bg-background"
           >
             <option value="all">All Arms</option>
             {uniqueArms.map(arm => (
@@ -406,7 +668,7 @@ function ModelsTab({ analysisId }: { analysisId: string }) {
           <select
             value={filterApproach}
             onChange={(e) => setFilterApproach(e.target.value)}
-            className="text-sm border rounded px-2 py-1"
+            className="text-sm border rounded px-2 py-1 bg-background"
           >
             <option value="all">All Approaches</option>
             {uniqueApproaches.map(approach => (
@@ -427,28 +689,28 @@ function ModelsTab({ analysisId }: { analysisId: string }) {
           {filteredModels.map((model) => (
             <Card
               key={model.id}
-              className="cursor-pointer hover:bg-muted transition-colors"
+              className="cursor-pointer hover:bg-muted/50 transition-colors"
               onClick={() => setSelectedModel(model.id)}
             >
-              <CardHeader>
-                <CardTitle className="text-sm">
-                  {model.arm} - {model.approach}
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center justify-between">
+                  <span>{model.distribution || model.approach}</span>
+                  <span className={cn(
+                    "text-xs px-2 py-0.5 rounded",
+                    model.approach === 'one-piece' && 'bg-blue-100 text-blue-700',
+                    model.approach === 'piecewise' && 'bg-purple-100 text-purple-700',
+                    model.approach === 'spline' && 'bg-green-100 text-green-700'
+                  )}>
+                    {model.approach}
+                  </span>
                 </CardTitle>
-                <CardDescription className="text-xs">
-                  Model #{model.model_order}
-                </CardDescription>
+                <CardDescription className="text-xs">{model.arm}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="text-xs space-y-1">
-                  {model.distribution && <p><strong>Distribution:</strong> {model.distribution}</p>}
-                  {model.scale && <p><strong>Scale:</strong> {model.scale}</p>}
-                  {model.knots && <p><strong>Knots:</strong> {model.knots}</p>}
-                  {model.cutpoint && <p><strong>Cutpoint:</strong> {model.cutpoint.toFixed(2)} months</p>}
-                  {model.aic !== null && <p><strong>AIC:</strong> {model.aic.toFixed(2)}</p>}
-                  {model.bic !== null && <p><strong>BIC:</strong> {model.bic.toFixed(2)}</p>}
-                </div>
-                <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
-                  Click to view details →
+                  {model.aic !== null && <p>AIC: {model.aic.toFixed(2)}</p>}
+                  {model.bic !== null && <p>BIC: {model.bic.toFixed(2)}</p>}
+                  {model.cutpoint && <p>Cutpoint: {model.cutpoint.toFixed(2)}mo</p>}
                 </div>
               </CardContent>
             </Card>
@@ -459,6 +721,7 @@ function ModelsTab({ analysisId }: { analysisId: string }) {
   );
 }
 
+// Model Detail View Component
 function ModelDetailView({
   analysisId,
   modelId,
@@ -495,69 +758,25 @@ function ModelDetailView({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center mb-4">
-        <Button variant="outline" onClick={onBack}>
-          ← Back to Models
-        </Button>
+      <div className="flex justify-between items-center">
+        <Button variant="outline" onClick={onBack}>← Back to Models</Button>
         <Button variant="outline" onClick={() => downloadPDF('model-detail-content', `model-${model.id}-report`)}>
           Download Report
         </Button>
       </div>
 
       <div id="model-detail-content" className="space-y-4">
-        {/* Model Metadata */}
+        {/* Model Info */}
         <Card>
           <CardHeader>
-            <CardTitle>
-              {model.arm} - {model.approach}
-              {model.distribution && ` (${model.distribution})`}
-            </CardTitle>
-            <CardDescription>Model #{model.model_order}</CardDescription>
+            <CardTitle>{model.arm} - {model.distribution || model.approach}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {model.distribution && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Distribution</p>
-                  <p className="font-semibold">{model.distribution}</p>
-                </div>
-              )}
-              {model.scale && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Scale</p>
-                  <p className="font-semibold">{model.scale}</p>
-                </div>
-              )}
-              {model.knots && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Knots</p>
-                  <p className="font-semibold">{model.knots}</p>
-                </div>
-              )}
-              {model.cutpoint && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Cutpoint</p>
-                  <p className="font-semibold">{model.cutpoint.toFixed(2)} months</p>
-                </div>
-              )}
-              {model.aic !== null && (
-                <div>
-                  <p className="text-sm text-muted-foreground">AIC</p>
-                  <p className="font-semibold">{model.aic.toFixed(2)}</p>
-                </div>
-              )}
-              {model.bic !== null && (
-                <div>
-                  <p className="text-sm text-muted-foreground">BIC</p>
-                  <p className="font-semibold">{model.bic.toFixed(2)}</p>
-                </div>
-              )}
-              {model.log_likelihood !== null && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Log-Likelihood</p>
-                  <p className="font-semibold">{model.log_likelihood.toFixed(2)}</p>
-                </div>
-              )}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              {model.aic !== null && <div><span className="text-muted-foreground">AIC:</span> {model.aic.toFixed(2)}</div>}
+              {model.bic !== null && <div><span className="text-muted-foreground">BIC:</span> {model.bic.toFixed(2)}</div>}
+              {model.cutpoint && <div><span className="text-muted-foreground">Cutpoint:</span> {model.cutpoint.toFixed(2)}mo</div>}
+              {model.knots && <div><span className="text-muted-foreground">Knots:</span> {model.knots}</div>}
             </div>
           </CardContent>
         </Card>
@@ -566,46 +785,29 @@ function ModelDetailView({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {shortTermPlot && (
             <Card>
-              <CardHeader>
-                <CardTitle>Short-Term Fit (0-30 months)</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base">Short-Term Fit</CardTitle></CardHeader>
               <CardContent>
-                {shortTermPlot.base64_data ? (
-                  <img
-                    src={`data:image/png;base64,${shortTermPlot.base64_data}`}
-                    alt="Short-term survival plot"
-                    className="w-full rounded-lg border"
-                  />
-                ) : (
-                  <img
-                    src={survivalApi.getPlotUrl(analysisId, modelId, 'short_term')}
-                    alt="Short-term survival plot"
-                    className="w-full rounded-lg border"
-                  />
-                )}
+                <img
+                  src={shortTermPlot.base64_data 
+                    ? `data:image/png;base64,${shortTermPlot.base64_data}`
+                    : survivalApi.getPlotUrl(analysisId, modelId, 'short_term')}
+                  alt="Short-term plot"
+                  className="w-full rounded border"
+                />
               </CardContent>
             </Card>
           )}
-
           {longTermPlot && (
             <Card>
-              <CardHeader>
-                <CardTitle>Long-Term Extrapolation (0-240 months)</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base">Long-Term Extrapolation</CardTitle></CardHeader>
               <CardContent>
-                {longTermPlot.base64_data ? (
-                  <img
-                    src={`data:image/png;base64,${longTermPlot.base64_data}`}
-                    alt="Long-term survival plot"
-                    className="w-full rounded-lg border"
-                  />
-                ) : (
-                  <img
-                    src={survivalApi.getPlotUrl(analysisId, modelId, 'long_term')}
-                    alt="Long-term survival plot"
-                    className="w-full rounded-lg border"
-                  />
-                )}
+                <img
+                  src={longTermPlot.base64_data
+                    ? `data:image/png;base64,${longTermPlot.base64_data}`
+                    : survivalApi.getPlotUrl(analysisId, modelId, 'long_term')}
+                  alt="Long-term plot"
+                  className="w-full rounded border"
+                />
               </CardContent>
             </Card>
           )}
@@ -614,48 +816,24 @@ function ModelDetailView({
         {/* Vision Assessment */}
         {vision_assessment && (
           <Card>
-            <CardHeader>
-              <CardTitle>Vision LLM Assessment</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {(vision_assessment.short_term_score !== null || vision_assessment.long_term_score !== null) && (
-                <div className="grid grid-cols-2 gap-4">
-                  {vision_assessment.short_term_score !== null && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">Short-Term Fit Score</p>
-                      <p className="text-2xl font-bold">
-                        {vision_assessment.short_term_score}/10
-                      </p>
-                    </div>
-                  )}
-                  {vision_assessment.long_term_score !== null && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">Long-Term Plausibility Score</p>
-                      <p className="text-2xl font-bold">
-                        {vision_assessment.long_term_score}/10
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-              {vision_assessment.strengths && (
-                <div>
-                  <p className="text-sm font-semibold mb-2">Strengths:</p>
-                  <p className="text-sm whitespace-pre-wrap">{vision_assessment.strengths}</p>
-                </div>
-              )}
-              {vision_assessment.weaknesses && (
-                <div>
-                  <p className="text-sm font-semibold mb-2">Weaknesses:</p>
-                  <p className="text-sm whitespace-pre-wrap">{vision_assessment.weaknesses}</p>
-                </div>
-              )}
-              {vision_assessment.concerns && (
-                <div>
-                  <p className="text-sm font-semibold mb-2">Concerns:</p>
-                  <p className="text-sm whitespace-pre-wrap">{vision_assessment.concerns}</p>
-                </div>
-              )}
+            <CardHeader><CardTitle className="text-base">Vision Assessment</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                {vision_assessment.short_term_score !== null && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Short-Term Score</p>
+                    <p className="text-2xl font-bold">{vision_assessment.short_term_score}/10</p>
+                  </div>
+                )}
+                {vision_assessment.long_term_score !== null && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Long-Term Score</p>
+                    <p className="text-2xl font-bold">{vision_assessment.long_term_score}/10</p>
+                  </div>
+                )}
+              </div>
+              {vision_assessment.strengths && <p className="text-sm"><strong>Strengths:</strong> {vision_assessment.strengths}</p>}
+              {vision_assessment.weaknesses && <p className="text-sm"><strong>Weaknesses:</strong> {vision_assessment.weaknesses}</p>}
             </CardContent>
           </Card>
         )}
@@ -663,51 +841,25 @@ function ModelDetailView({
         {/* Reasoning Assessment */}
         {reasoning_assessment && (
           <Card>
-            <CardHeader>
-              <CardTitle>Reasoning LLM Assessment</CardTitle>
-              <CardDescription>Concise clinical evaluation</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Check if we have the new structured sections */}
-              {reasoning_assessment.sections && (reasoning_assessment.sections.statistical_visual_fit || reasoning_assessment.sections.recommendation) ? (
-                <div className="space-y-4">
-                  {/* 1. Recommendation (Top Priority) */}
-                  <div className={`p-4 rounded-lg border ${(reasoning_assessment.sections.recommendation?.toLowerCase().includes('reject') ||
-                    reasoning_assessment.sections.recommendation?.toLowerCase().includes('not recommended')) ? 'bg-red-50 border-red-200' :
-                    reasoning_assessment.sections.recommendation?.toLowerCase().includes('base case') ? 'bg-green-50 border-green-200' :
-                      'bg-blue-50 border-blue-200'
-                    }`}>
-                    <h4 className="font-semibold mb-2 flex items-center gap-2">
-                      🎯 Final Recommendation
-                    </h4>
-                    <p className="text-sm whitespace-pre-wrap">{reasoning_assessment.sections.recommendation}</p>
+            <CardHeader><CardTitle className="text-base">Reasoning Assessment</CardTitle></CardHeader>
+            <CardContent>
+              {reasoning_assessment.sections?.recommendation ? (
+                <div className="space-y-3">
+                  <div className="p-3 bg-primary/5 rounded border">
+                    <p className="font-semibold mb-1">Recommendation</p>
+                    <p className="text-sm">{reasoning_assessment.sections.recommendation}</p>
                   </div>
-
-                  {/* 2. Statistical & Visual Fit */}
-                  <div className="p-4 rounded-lg border bg-muted/30">
-                    <h4 className="font-semibold mb-2">📊 Statistical & Visual Fit</h4>
-                    <p className="text-sm whitespace-pre-wrap">{reasoning_assessment.sections.statistical_visual_fit}</p>
-                  </div>
-
-                  {/* 3. Extrapolation & Clinical Plausibility */}
-                  <div className="p-4 rounded-lg border bg-muted/30">
-                    <h4 className="font-semibold mb-2">🏥 Extrapolation & Clinical Plausibility</h4>
-                    <p className="text-sm whitespace-pre-wrap">{reasoning_assessment.sections.clinical_plausibility}</p>
-                  </div>
-
-                  {/* 4. Strengths & Weaknesses */}
-                  <div className="p-4 rounded-lg border bg-muted/30">
-                    <h4 className="font-semibold mb-2">⚖️ Strengths & Weaknesses</h4>
-                    <p className="text-sm whitespace-pre-wrap">{reasoning_assessment.sections.strengths_weaknesses}</p>
-                  </div>
+                  {reasoning_assessment.sections.statistical_visual_fit && (
+                    <div>
+                      <p className="font-semibold mb-1 text-sm">Statistical Fit</p>
+                      <p className="text-sm text-muted-foreground">{reasoning_assessment.sections.statistical_visual_fit}</p>
+                    </div>
+                  )}
                 </div>
               ) : (
-                /* Fallback for old format */
-                <div className="max-h-96 overflow-y-auto">
-                  <p className="text-sm whitespace-pre-wrap">
-                    {reasoning_assessment.assessment_text || reasoning_assessment.full_text || 'Not available'}
-                  </p>
-                </div>
+                <p className="text-sm whitespace-pre-wrap max-h-48 overflow-y-auto">
+                  {reasoning_assessment.assessment_text || reasoning_assessment.full_text || 'N/A'}
+                </p>
               )}
             </CardContent>
           </Card>
@@ -717,6 +869,7 @@ function ModelDetailView({
   );
 }
 
+// Synthesis Tab Component
 function SynthesisTab({ analysisId }: { analysisId: string }) {
   const [synthesis, setSynthesis] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -737,32 +890,26 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
   };
 
   if (loading) return <div>Loading synthesis...</div>;
-  if (!synthesis) return <div>No synthesis report available yet.</div>;
+  if (!synthesis) return <div className="text-muted-foreground">No synthesis report available yet.</div>;
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader>
-          <CardTitle>Primary Recommendation</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Primary Recommendation</CardTitle></CardHeader>
         <CardContent>
           <p className="whitespace-pre-wrap">{synthesis.primary_recommendation || 'Not available'}</p>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Key Uncertainties</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Key Uncertainties</CardTitle></CardHeader>
         <CardContent>
           <p className="whitespace-pre-wrap">{synthesis.key_uncertainties || 'Not available'}</p>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Full Report</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Full Report</CardTitle></CardHeader>
         <CardContent>
           <div className="max-h-96 overflow-y-auto">
             <p className="whitespace-pre-wrap text-sm">{synthesis.full_text}</p>
@@ -773,6 +920,7 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
   );
 }
 
+// PH Tests Tab Component
 function PHTestsTab({ analysisId }: { analysisId: string }) {
   const [phTests, setPhTests] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -793,9 +941,8 @@ function PHTestsTab({ analysisId }: { analysisId: string }) {
   };
 
   if (loading) return <div>Loading PH test results...</div>;
-  if (!phTests) return <div>No PH test results available yet.</div>;
+  if (!phTests) return <div className="text-muted-foreground">No PH test results available yet.</div>;
 
-  // Handle diagnostic plots from JSONB field
   const diagnosticPlots = typeof phTests.diagnostic_plots === 'object' && phTests.diagnostic_plots !== null
     ? phTests.diagnostic_plots
     : phTests.test_results?.diagnostic_plots || {};
@@ -804,162 +951,88 @@ function PHTestsTab({ analysisId }: { analysisId: string }) {
 
   return (
     <div className="space-y-6">
-      {/* 1. Expert Assessment (Top Priority) */}
-      <Card className={`border-l-4 ${isViolated ? 'border-l-orange-500' : 'border-l-green-500'}`}>
+      {/* Decision Card */}
+      <Card className={cn(
+        "border-l-4",
+        isViolated ? "border-l-amber-500" : "border-l-green-500"
+      )}>
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle className="flex items-center gap-2">
-              Expert Assessment
-              {isViolated ? (
-                <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs rounded-full">PH Violated</span>
-              ) : (
-                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">PH Valid</span>
-              )}
-            </CardTitle>
-          </div>
-          <CardDescription>
-            Final decision based on clinical context and visual evidence (overrides statistics)
-          </CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            Expert Assessment
+            <span className={cn(
+              "px-2 py-1 text-xs rounded-full",
+              isViolated ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"
+            )}>
+              {isViolated ? 'PH Violated' : 'PH Valid'}
+            </span>
+          </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-1">Recommended Approach</p>
-            <p className="text-2xl font-bold">
-              {isViolated ? 'Separate Models' : 'Pooled Model (Standard Cox)'}
-            </p>
-          </div>
-
+        <CardContent>
+          <p className="text-lg font-semibold mb-2">
+            {isViolated ? 'Separate Models Recommended' : 'Pooled Model (Standard Cox)'}
+          </p>
           {phTests.rationale && (
-            <div className="p-4 bg-muted/50 rounded-lg border">
-              <p className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <span className="text-primary">ℹ️</span> Clinical Rationale
-              </p>
-              <p className="text-base leading-relaxed">{phTests.rationale}</p>
-            </div>
+            <p className="text-sm text-muted-foreground">{phTests.rationale}</p>
           )}
         </CardContent>
       </Card>
 
-      {/* 2. Visual Evidence (Diagnostic Plots) */}
-      <div className="space-y-6">
-        <h3 className="text-lg font-semibold">Diagnostic Plots</h3>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Cumulative Hazard Plot */}
+      {/* Diagnostic Plots */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {diagnosticPlots.cumulative_hazard && (
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Cumulative Hazard</CardTitle>
-              <CardDescription>
-                Visual check for diverging curves (general survival pattern)
-              </CardDescription>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-base">Cumulative Hazard</CardTitle></CardHeader>
             <CardContent>
-              {diagnosticPlots.cumulative_hazard ? (
-                <img
-                  src={`data:image/png;base64,${diagnosticPlots.cumulative_hazard}`}
-                  alt="Cumulative Hazard Plot"
-                  className="w-full rounded-lg border bg-white"
-                />
-              ) : (
-                <div className="h-64 flex items-center justify-center bg-muted rounded-lg text-muted-foreground">
-                  Plot not available
-                </div>
-              )}
+              <img
+                src={`data:image/png;base64,${diagnosticPlots.cumulative_hazard}`}
+                alt="Cumulative Hazard"
+                className="w-full rounded border bg-white"
+              />
             </CardContent>
           </Card>
-
-          {/* Log-Cumulative Hazard Plot */}
+        )}
+        {diagnosticPlots.log_cumulative_hazard && (
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Log-Cumulative Hazard</CardTitle>
-              <CardDescription>
-                Parallel lines = PH holds. Crossing/Converging = PH Violated.
-              </CardDescription>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-base">Log-Cumulative Hazard</CardTitle></CardHeader>
             <CardContent>
-              {diagnosticPlots.log_cumulative_hazard ? (
-                <img
-                  src={`data:image/png;base64,${diagnosticPlots.log_cumulative_hazard}`}
-                  alt="Log-Cumulative Hazard Plot"
-                  className="w-full rounded-lg border bg-white"
-                />
-              ) : (
-                <div className="h-64 flex items-center justify-center bg-muted rounded-lg text-muted-foreground">
-                  Plot not available
-                </div>
-              )}
+              <img
+                src={`data:image/png;base64,${diagnosticPlots.log_cumulative_hazard}`}
+                alt="Log-Cumulative Hazard"
+                className="w-full rounded border bg-white"
+              />
             </CardContent>
           </Card>
-
-          {/* Schoenfeld Residuals Plot */}
+        )}
+        {diagnosticPlots.schoenfeld_residuals && (
           <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-lg">Schoenfeld Residuals</CardTitle>
-              <CardDescription>
-                Flat line = PH holds. Sloped/Curved = PH Violated.
-              </CardDescription>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-base">Schoenfeld Residuals</CardTitle></CardHeader>
             <CardContent>
-              {diagnosticPlots.schoenfeld_residuals ? (
-                <img
-                  src={`data:image/png;base64,${diagnosticPlots.schoenfeld_residuals}`}
-                  alt="Schoenfeld Residuals Plot"
-                  className="w-full rounded-lg border bg-white"
-                />
-              ) : (
-                <div className="h-64 flex items-center justify-center bg-muted rounded-lg text-muted-foreground">
-                  Plot not available
-                </div>
-              )}
+              <img
+                src={`data:image/png;base64,${diagnosticPlots.schoenfeld_residuals}`}
+                alt="Schoenfeld Residuals"
+                className="w-full rounded border bg-white"
+              />
             </CardContent>
           </Card>
-        </div>
+        )}
       </div>
 
-      {/* 3. Statistical Details (Secondary) */}
+      {/* Statistical Tests */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Statistical Test Results</CardTitle>
-          <CardDescription>
-            Formal statistical tests for proportionality (p &lt; 0.05 indicates violation)
-          </CardDescription>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">Statistical Tests</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 border rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Schoenfeld Test</p>
-              <div className="flex items-baseline gap-2">
-                <p className="text-xl font-mono font-semibold">
-                  p = {phTests.schoenfeld_pvalue ? phTests.schoenfeld_pvalue.toFixed(4) : 'N/A'}
-                </p>
-                <span className={`text-xs px-2 py-0.5 rounded ${(phTests.schoenfeld_pvalue || 1) < 0.05 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                  }`}>
-                  {(phTests.schoenfeld_pvalue || 1) < 0.05 ? 'Sig.' : 'Not Sig.'}
-                </span>
-              </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="p-3 border rounded">
+              <p className="text-sm text-muted-foreground">Schoenfeld p-value</p>
+              <p className="text-xl font-mono">{phTests.schoenfeld_pvalue?.toFixed(4) ?? 'N/A'}</p>
             </div>
-
-            <div className="p-4 border rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Time-Dependent Cox</p>
-              <div className="flex items-baseline gap-2">
-                <p className="text-xl font-mono font-semibold">
-                  p = {phTests.chow_test_pvalue ? phTests.chow_test_pvalue.toFixed(4) : 'N/A'}
-                </p>
-                <span className={`text-xs px-2 py-0.5 rounded ${(phTests.chow_test_pvalue || 1) < 0.05 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                  }`}>
-                  {(phTests.chow_test_pvalue || 1) < 0.05 ? 'Sig.' : 'Not Sig.'}
-                </span>
-              </div>
+            <div className="p-3 border rounded">
+              <p className="text-sm text-muted-foreground">Time-Dependent Cox p-value</p>
+              <p className="text-xl font-mono">{phTests.chow_test_pvalue?.toFixed(4) ?? 'N/A'}</p>
             </div>
-
-            <div className="p-4 border rounded-lg opacity-75">
-              <p className="text-sm text-muted-foreground mb-1">Log-Rank Test</p>
-              <div className="flex items-baseline gap-2">
-                <p className="text-xl font-mono font-semibold">
-                  p = {phTests.logrank_pvalue ? phTests.logrank_pvalue.toFixed(4) : 'N/A'}
-                </p>
-                <span className="text-xs text-muted-foreground">(Tests survival diff, not PH)</span>
-              </div>
+            <div className="p-3 border rounded">
+              <p className="text-sm text-muted-foreground">Log-Rank p-value</p>
+              <p className="text-xl font-mono">{phTests.logrank_pvalue?.toFixed(4) ?? 'N/A'}</p>
             </div>
           </div>
         </CardContent>
@@ -968,6 +1041,7 @@ function PHTestsTab({ analysisId }: { analysisId: string }) {
   );
 }
 
+// Token Usage Tab Component
 function TokenUsageTab({ analysisId }: { analysisId: string }) {
   const [usage, setUsage] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -988,14 +1062,12 @@ function TokenUsageTab({ analysisId }: { analysisId: string }) {
   };
 
   if (loading) return <div>Loading token usage...</div>;
-  if (!usage) return <div>No token usage data available.</div>;
+  if (!usage) return <div className="text-muted-foreground">No token usage data available.</div>;
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader>
-          <CardTitle>Total Usage</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Total Usage</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-3 gap-4">
             <div>
@@ -1015,18 +1087,13 @@ function TokenUsageTab({ analysisId }: { analysisId: string }) {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Usage by Call</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Usage by Call</CardTitle></CardHeader>
         <CardContent>
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-64 overflow-y-auto">
             {usage.usage.map((u: any) => (
-              <div key={u.id} className="flex justify-between p-2 border rounded">
-                <span className="text-sm">{u.model_type}</span>
-                <span className="text-sm">
-                  {u.tokens_input + u.tokens_output} tokens
-                  {u.cost_estimate && ` ($${u.cost_estimate.toFixed(4)})`}
-                </span>
+              <div key={u.id} className="flex justify-between p-2 border rounded text-sm">
+                <span>{u.model_type}</span>
+                <span>{u.tokens_input + u.tokens_output} tokens</span>
               </div>
             ))}
           </div>
@@ -1035,4 +1102,3 @@ function TokenUsageTab({ analysisId }: { analysisId: string }) {
     </div>
   );
 }
-

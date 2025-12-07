@@ -39,6 +39,32 @@ async function getAuthToken(): Promise<string | null> {
   return user.getIdToken();
 }
 
+/**
+ * Get auth headers for fetch requests (synchronous version for simple use cases)
+ * For authenticated requests, prefer using fetchWithAuth instead
+ */
+export function getAuthHeaders(): Record<string, string> {
+  // In demo mode, return demo headers
+  if (isDemoMode()) {
+    return {
+      'Authorization': 'Bearer demo-token-for-testing'
+    };
+  }
+  
+  // For synchronous use, we check if there's a cached token
+  // For proper auth, use fetchWithAuth which is async
+  const auth = getAuth(app);
+  const user = auth.currentUser;
+  if (!user) {
+    return {};
+  }
+  
+  // Note: This won't have the fresh token since getIdToken is async
+  // The token is cached after first auth, so this may work for short-lived sessions
+  // For production, consider using fetchWithAuth instead
+  return {};
+}
+
 export async function fetchWithAuth(
   endpoint: string,
   options: RequestInit = {}

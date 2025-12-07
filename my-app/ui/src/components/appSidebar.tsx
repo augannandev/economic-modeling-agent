@@ -1,9 +1,11 @@
 import { 
   Home, 
   Settings, 
-  FileText,
-  Layers,
+  FolderOpen,
   Activity,
+  FileSpreadsheet,
+  BookOpen,
+  Network,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -21,13 +23,16 @@ import {
 export function AppSidebar() {
   const location = useLocation();
 
-  const isActive = (path: string) => location.pathname === path;
+  const isActive = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  };
 
   return (
     <Sidebar collapsible="icon" className="sticky top-12 h-[calc(100vh-3rem)] z-40">
       <SidebarContent className="overflow-y-auto">
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Dashboard</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -39,18 +44,26 @@ export function AppSidebar() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Page 1" isActive={isActive('/page1')} asChild>
-                  <Link to="/page1">
-                    <FileText className="w-4 h-4" />
-                    <span>Page 1</span>
+                <SidebarMenuButton tooltip="Projects" isActive={isActive('/projects')} asChild>
+                  <Link to="/projects">
+                    <FolderOpen className="w-4 h-4" />
+                    <span>Projects</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Analysis Tools</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Page 2" isActive={isActive('/page2')} asChild>
-                  <Link to="/page2">
-                    <Layers className="w-4 h-4" />
-                    <span>Page 2</span>
+                <SidebarMenuButton tooltip="KM Digitizer" isActive={isActive('/digitizer')} asChild>
+                  <Link to="/digitizer">
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>KM Digitizer</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -59,6 +72,22 @@ export function AppSidebar() {
                   <Link to="/survival-analysis">
                     <Activity className="w-4 h-4" />
                     <span>Survival Analysis</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton tooltip="Literature Review" isActive={isActive('/slr')} asChild>
+                  <Link to="/slr">
+                    <BookOpen className="w-4 h-4" />
+                    <span>Literature Review</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton tooltip="Network Meta-Analysis" isActive={isActive('/nma')} asChild>
+                  <Link to="/nma">
+                    <Network className="w-4 h-4" />
+                    <span>NMA</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -81,4 +110,4 @@ export function AppSidebar() {
       </SidebarFooter>
     </Sidebar>
   );
-} 
+}
