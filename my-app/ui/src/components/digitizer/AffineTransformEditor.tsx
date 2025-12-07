@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { 
-  MousePointer2, 
   Target, 
   Plus, 
   RotateCcw, 
@@ -78,7 +77,7 @@ export function AffineTransformEditor({
   // Points state
   const [points, setPoints] = useState<DataPoint[]>(existingPoints);
   const [newPoints, setNewPoints] = useState<DataPoint[]>([]);
-  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+  const [_selectedPointIndex, _setSelectedPointIndex] = useState<number | null>(null); // Reserved for future selection feature
   
   // Cursor position
   const [cursorPosition, setCursorPosition] = useState<{ pixel: { x: number; y: number }; data: { x: number; y: number } | null } | null>(null);

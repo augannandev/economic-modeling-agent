@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { AffineTransformEditor, DataPoint } from './AffineTransformEditor';
 import { PointEditor } from './PointEditor';
-import { cn } from '@/lib/utils';
 
 interface RiskTableRow {
   time: number;
