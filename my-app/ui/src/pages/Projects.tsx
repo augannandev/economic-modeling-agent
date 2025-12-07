@@ -11,7 +11,6 @@ import {
   Clock, 
   CheckCircle2, 
   Archive,
-  MoreHorizontal,
   Trash2,
   Edit,
   ExternalLink

@@ -27,6 +27,9 @@ export function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [recentAnalyses, setRecentAnalyses] = useState<Analysis[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Suppress unused variable warning
+  void loading;
 
   useEffect(() => {
     loadDashboardData();

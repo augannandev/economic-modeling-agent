@@ -5,7 +5,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ModelSelector } from './ModelSelector';
 import { 
   CheckCircle2, 
-  XCircle, 
   AlertTriangle, 
   ChevronDown, 
   ChevronUp,
@@ -65,6 +64,8 @@ export function FinalDecisionPanel({
   onApprove,
   isSubmitting = false,
 }: FinalDecisionPanelProps) {
+  // Suppress unused variable warning - reserved for future use
+  void analysisId;
   const [decisions, setDecisions] = useState<Record<string, UserDecision>>(() => {
     const initial: Record<string, UserDecision> = {};
     recommendations.forEach((rec) => {

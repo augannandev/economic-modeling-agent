@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { projectsApi, type Project, type Arm, type Endpoint, type DataSource } from '@/lib/projectsApi';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,8 +18,6 @@ import {
   Database,
   PlayCircle,
   Settings,
-  MoreHorizontal,
-  Edit,
   CheckCircle2,
   Clock,
   AlertCircle
