@@ -11,10 +11,11 @@ declare module 'hono' {
   }
 }
 
-// Check if we're in demo mode (no real Firebase config)
+// Check if we're in demo mode (no real Firebase config or anonymous allowed)
 const isDemoMode = () => {
   const projectId = getFirebaseProjectId();
-  return !projectId || projectId === 'demo-project';
+  const allowAnonymous = getAllowAnonymousUsers();
+  return !projectId || projectId === 'demo-project' || allowAnonymous;
 };
 
 // Demo user for testing without Firebase
@@ -30,13 +31,24 @@ const DEMO_USER: User = {
 export const authMiddleware: MiddlewareHandler = async (c, next) => {
   try {
     const authHeader = c.req.header('Authorization');
+    
+    // Check if anonymous/demo mode is enabled
+    const allowAnonymous = getAllowAnonymousUsers();
+    
+    // If no auth header and anonymous is allowed, use demo user
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      if (allowAnonymous) {
+        console.log('🎭 Anonymous mode: using demo user (no auth header)');
+        c.set('user', DEMO_USER);
+        await next();
+        return;
+      }
       return c.json({ error: 'Authentication required' }, 401);
     }
 
     const token = authHeader.split('Bearer ')[1];
     
-    // Handle demo mode - accept demo token
+    // Handle demo mode - accept demo token or any token when anonymous allowed
     if (isDemoMode() || token === 'demo-token-for-testing') {
       console.log('🎭 Demo mode: using demo user');
       c.set('user', DEMO_USER);
