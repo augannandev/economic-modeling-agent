@@ -195,7 +195,7 @@ export function DataEditor({
                     <img 
                       src={imageUrl} 
                       alt="Original KM Plot" 
-                      className="w-full h-auto max-h-80 object-contain"
+                      className="w-full h-auto max-h-[600px] object-contain"
                     />
                   </div>
                 </div>
@@ -206,8 +206,8 @@ export function DataEditor({
                     <LineChart className="h-4 w-4" />
                     Extracted Curve ({points.length} points)
                   </h4>
-                  <div className="border rounded-lg p-4 bg-white h-80">
-                    <svg width="100%" height="100%" viewBox="0 0 400 280" preserveAspectRatio="xMidYMid meet">
+                  <div className="border rounded-lg p-4 bg-white min-h-[600px]">
+                    <svg width="100%" height="100%" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid meet" style={{ minHeight: '600px' }}>
                       {/* Grid lines */}
                       <defs>
                         <pattern id="gridPattern" width="68" height="44" patternUnits="userSpaceOnUse">

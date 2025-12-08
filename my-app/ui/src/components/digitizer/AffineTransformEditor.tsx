@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -53,6 +53,8 @@ export function AffineTransformEditor({
 }: AffineTransformEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastUpdateRef = useRef<number>(0);
   
   const [mode, setMode] = useState<EditorMode>('view');
   const [showGrid, setShowGrid] = useState(false);
@@ -172,7 +174,7 @@ export function AffineTransformEditor({
     }
   }, [mode, calibrationStep, referencePoints, isCalibrated, pixelToData, calculateTransform, axisRanges, zoom]);
 
-  // Handle mouse move for cursor position display
+  // Handle mouse move for cursor position display (throttled with requestAnimationFrame)
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!imageRef.current) return;
     
@@ -184,16 +186,33 @@ export function AffineTransformEditor({
       return;
     }
     
-    const rect = imageRef.current.getBoundingClientRect();
-    const pixelX = (e.clientX - rect.left) / zoom;
-    const pixelY = (e.clientY - rect.top) / zoom;
+    // Capture values immediately to avoid stale closures
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    const currentZoom = zoom;
+    const currentIsCalibrated = isCalibrated;
     
-    const dataCoords = isCalibrated ? pixelToData(pixelX, pixelY) : null;
-    
-    setCursorPosition({
-      pixel: { x: Math.round(pixelX), y: Math.round(pixelY) },
-      data: dataCoords
-    });
+    // Throttle cursor position updates using requestAnimationFrame
+    const now = Date.now();
+    if (rafRef.current === null && now - lastUpdateRef.current >= 16) { // ~60fps
+      rafRef.current = requestAnimationFrame(() => {
+        if (!imageRef.current) return;
+        
+        const rect = imageRef.current.getBoundingClientRect();
+        const pixelX = (clientX - rect.left) / currentZoom;
+        const pixelY = (clientY - rect.top) / currentZoom;
+        
+        const dataCoords = currentIsCalibrated ? pixelToData(pixelX, pixelY) : null;
+        
+        setCursorPosition({
+          pixel: { x: Math.round(pixelX), y: Math.round(pixelY) },
+          data: dataCoords
+        });
+        
+        lastUpdateRef.current = Date.now();
+        rafRef.current = null;
+      });
+    }
   }, [isPanning, lastPanPoint, zoom, isCalibrated, pixelToData]);
 
   // Handle pan start
@@ -231,20 +250,69 @@ export function AffineTransformEditor({
     onPointsChange(allPoints);
   };
 
-  // Image load handler
-  const handleImageLoad = () => {
-    if (imageRef.current) {
+  // Image load handler with auto-fit
+  const handleImageLoad = useCallback(() => {
+    if (imageRef.current && containerRef.current) {
+      const img = imageRef.current;
+      const container = containerRef.current;
+      
+      const imgWidth = img.naturalWidth;
+      const imgHeight = img.naturalHeight;
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      
       setImageDimensions({
-        width: imageRef.current.naturalWidth,
-        height: imageRef.current.naturalHeight
+        width: imgWidth,
+        height: imgHeight
       });
+      
+      // Calculate zoom to fit image in container
+      const scaleX = containerWidth / imgWidth;
+      const scaleY = containerHeight / imgHeight;
+      const fitZoom = Math.min(scaleX, scaleY, 1); // Don't zoom in beyond 100%
+      
+      // Center the image
+      const scaledWidth = imgWidth * fitZoom;
+      const scaledHeight = imgHeight * fitZoom;
+      const centerX = (containerWidth - scaledWidth) / 2;
+      const centerY = (containerHeight - scaledHeight) / 2;
+      
+      setZoom(fitZoom);
+      setPan({ x: centerX, y: centerY });
     }
-  };
+  }, []);
 
   // Update points when existingPoints changes
   useEffect(() => {
     setPoints(existingPoints);
   }, [existingPoints]);
+
+  // Cleanup animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
+  // Memoize transform calculations for existing points
+  const existingPointsPixels = useMemo(() => {
+    if (!isCalibrated || points.length === 0) return [];
+    return points.map(point => {
+      const pixel = dataToPixel(point.time, point.survival);
+      return pixel ? { point, pixel } : null;
+    }).filter((item): item is { point: DataPoint; pixel: { x: number; y: number } } => item !== null);
+  }, [isCalibrated, points, dataToPixel]);
+
+  // Memoize transform calculations for new points
+  const newPointsPixels = useMemo(() => {
+    if (!isCalibrated || newPoints.length === 0) return [];
+    return newPoints.map(point => {
+      const pixel = dataToPixel(point.time, point.survival);
+      return pixel ? { point, pixel } : null;
+    }).filter((item): item is { point: DataPoint; pixel: { x: number; y: number } } => item !== null);
+  }, [isCalibrated, newPoints, dataToPixel]);
 
   const calibrationInstructions = [
     "Click on the ORIGIN point (Time=0, Survival=1.0 or 100%)",
@@ -387,20 +455,30 @@ export function AffineTransformEditor({
             ref={containerRef}
             className="relative overflow-hidden border rounded-lg bg-white cursor-crosshair"
             style={{ 
-              height: '500px',
+              height: '70vh',
+              minHeight: '600px',
+              maxHeight: '800px',
               cursor: mode === 'view' ? 'grab' : 'crosshair'
             }}
             onClick={handleImageClick}
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseDown}
             onMouseUp={handleMouseUp}
-            onMouseLeave={() => { setCursorPosition(null); setIsPanning(false); }}
+            onMouseLeave={() => { 
+              setCursorPosition(null); 
+              setIsPanning(false);
+              if (rafRef.current !== null) {
+                cancelAnimationFrame(rafRef.current);
+                rafRef.current = null;
+              }
+            }}
           >
             <div
               style={{
                 transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                 transformOrigin: 'top left',
-                position: 'relative'
+                position: 'relative',
+                willChange: 'transform'
               }}
             >
               {/* KM Plot Image */}
@@ -409,6 +487,10 @@ export function AffineTransformEditor({
                 src={imageUrl}
                 alt="KM Plot"
                 className="max-w-none"
+                style={{ 
+                  display: 'block',
+                  objectFit: 'contain'
+                }}
                 onLoad={handleImageLoad}
                 draggable={false}
               />
@@ -462,39 +544,31 @@ export function AffineTransformEditor({
                 </div>
               ))}
 
-              {/* Existing Points (if calibrated) */}
-              {isCalibrated && points.map((point, i) => {
-                const pixel = dataToPixel(point.time, point.survival);
-                if (!pixel) return null;
-                return (
-                  <div
-                    key={`existing-${i}`}
-                    className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-blue-500 border-2 border-white shadow cursor-pointer hover:scale-125 transition-transform"
-                    style={{ left: pixel.x, top: pixel.y }}
-                    title={`Time: ${point.time}, Survival: ${point.survival}`}
-                  />
-                );
-              })}
+              {/* Existing Points (if calibrated) - using memoized pixels */}
+              {existingPointsPixels.map(({ point, pixel }, i) => (
+                <div
+                  key={`existing-${point.id || i}`}
+                  className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-blue-500 border-2 border-white shadow cursor-pointer hover:scale-125 transition-transform will-change-transform"
+                  style={{ left: pixel.x, top: pixel.y }}
+                  title={`Time: ${point.time}, Survival: ${point.survival}`}
+                />
+              ))}
 
-              {/* New Points */}
-              {isCalibrated && newPoints.map((point, i) => {
-                const pixel = dataToPixel(point.time, point.survival);
-                if (!pixel) return null;
-                return (
-                  <div
-                    key={`new-${i}`}
-                    className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-green-500 border-2 border-white shadow cursor-pointer hover:scale-125 transition-transform group"
-                    style={{ left: pixel.x, top: pixel.y }}
-                    title={`NEW - Time: ${point.time}, Survival: ${point.survival}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRemoveNewPoint(i);
-                    }}
-                  >
-                    <X className="h-3 w-3 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100" />
-                  </div>
-                );
-              })}
+              {/* New Points - using memoized pixels */}
+              {newPointsPixels.map(({ point, pixel }, i) => (
+                <div
+                  key={`new-${point.id || i}`}
+                  className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-green-500 border-2 border-white shadow cursor-pointer hover:scale-125 transition-transform group will-change-transform"
+                  style={{ left: pixel.x, top: pixel.y }}
+                  title={`NEW - Time: ${point.time}, Survival: ${point.survival}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRemoveNewPoint(i);
+                  }}
+                >
+                  <X className="h-3 w-3 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100" />
+                </div>
+              ))}
             </div>
           </div>
 
