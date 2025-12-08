@@ -99,8 +99,8 @@ export function Markdown({ content, className }: MarkdownProps) {
 
         // Tables with zebra striping and hover effects
         table: ({ children }) => (
-          <div className="my-6 overflow-x-auto rounded-lg border border-border shadow-sm">
-            <table className="min-w-full divide-y divide-border">
+          <div className="my-6 w-full overflow-x-auto rounded-lg border border-border shadow-sm">
+            <table className="w-full divide-y divide-border">
               {children}
             </table>
           </div>
@@ -126,7 +126,7 @@ export function Markdown({ content, className }: MarkdownProps) {
           </th>
         ),
         td: ({ children }) => (
-          <td className="px-4 py-3 text-sm text-foreground/90 whitespace-nowrap">
+          <td className="px-4 py-3 text-sm text-foreground/90">
             {children}
           </td>
         ),
