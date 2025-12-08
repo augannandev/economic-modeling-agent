@@ -159,15 +159,15 @@ export function SurvivalAnalysis() {
   const currentStepIndex = getStepIndex(selectedAnalysis?.workflow_state || null);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)]">
+    <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden">
       {/* Main Content */}
       <div className={cn(
         "flex-1 min-w-0 overflow-y-auto overflow-x-hidden transition-all duration-300",
         isChatOpen ? "mr-96" : ""
       )}>
-        <div className="container mx-auto p-6 space-y-6">
+        <div className="w-full max-w-7xl mx-auto p-6 space-y-6">
           {/* Header */}
-          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Survival Analysis</h1>
               <p className="text-muted-foreground mt-1">
@@ -175,9 +175,9 @@ export function SurvivalAnalysis() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {/* Endpoint Toggle */}
-              <div className="flex items-center bg-muted/50 p-1 rounded-lg border">
+              <div className="flex items-center bg-muted/50 p-1 rounded-lg border flex-shrink-0">
                 <button
                   className={cn(
                     "px-3 py-1.5 text-sm font-medium rounded-md transition-all",
@@ -258,9 +258,9 @@ export function SurvivalAnalysis() {
 
           {/* Workflow Steps */}
           {selectedAnalysis && (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-4">
+            <Card className="overflow-hidden">
+              <CardContent className="pt-6 overflow-x-auto">
+                <div className="flex items-center justify-between mb-4 min-w-max">
                   {WORKFLOW_STEPS.map((step, idx) => {
                     const isComplete = idx < currentStepIndex || selectedAnalysis.status === 'completed';
                     const isCurrent = idx === currentStepIndex && selectedAnalysis.status === 'running';
