@@ -23,9 +23,9 @@ export function Markdown({ content, className }: MarkdownProps) {
   const processedContent = preprocessMarkdown(content);
 
   return (
-    <div style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+    <div className="w-full max-w-full" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
       <ReactMarkdown
-        className={cn('markdown-content prose prose-slate dark:prose-invert max-w-none', className)}
+        className={cn('markdown-content w-full', className)}
         remarkPlugins={[remarkGfm]}
       components={{
         // Headings with colored left border accent
