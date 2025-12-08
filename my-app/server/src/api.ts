@@ -1307,8 +1307,10 @@ api.post('/rag/ingest', async (c) => {
     if (!ragDir) {
       // Try relative paths from server directory
       const possiblePaths = [
+        path.join(process.cwd(), 'data', 'rag_docs'),  // Production: /app/data/rag_docs
         path.join(process.cwd(), 'rag_data'),
         path.join(process.cwd(), '..', 'rag_data'),
+        path.join(__dirname, '..', '..', 'data', 'rag_docs'),
         path.join(__dirname, '..', '..', 'rag_data'),
       ];
       

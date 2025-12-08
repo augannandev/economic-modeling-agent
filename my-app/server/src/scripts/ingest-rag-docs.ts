@@ -25,8 +25,8 @@ async function main() {
   
   const ragService = getRAGService();
   
-  // Determine rag_data path
-  const ragDir = process.env.RAG_DATA_DIR || path.resolve(__dirname, '../../../rag_data');
+  // Determine rag_data path - use data/rag_docs in production
+  const ragDir = process.env.RAG_DATA_DIR || path.resolve(process.cwd(), 'data', 'rag_docs');
   
   console.log(`RAG Data Directory: ${ragDir}`);
   console.log(`ChromaDB URL: ${process.env.CHROMA_URL || 'http://localhost:8000'}\n`);

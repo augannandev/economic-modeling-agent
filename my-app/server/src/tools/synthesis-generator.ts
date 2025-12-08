@@ -84,7 +84,7 @@ async function getSynthesisRAGContext(indication?: string): Promise<string> {
     
     // Fallback to simple file-based context
     try {
-      const ragDir = path.join(process.cwd(), '..', 'rag_data');
+      const ragDir = path.join(process.cwd(), 'data', 'rag_docs');
       const simpleContext = await getSimpleRAGContext(ragDir, 'TSD survival model selection');
       return `## Methodology Context\n\n${simpleContext}`;
     } catch {

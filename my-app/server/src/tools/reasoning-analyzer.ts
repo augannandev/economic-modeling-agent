@@ -73,7 +73,7 @@ ${benchmarkContext ? `### External Benchmarks\n${benchmarkContext}` : ''}
     
     // Fallback to simple file-based context
     try {
-      const ragDir = path.join(process.cwd(), '..', 'rag_data');
+      const ragDir = path.join(process.cwd(), 'data', 'rag_docs');
       return await getSimpleRAGContext(ragDir, `${distribution} ${approach} survival`);
     } catch {
       return '';

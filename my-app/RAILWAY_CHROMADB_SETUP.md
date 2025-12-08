@@ -36,24 +36,17 @@ OPENAI_API_KEY=sk-your-openai-key
 RAG_DATA_DIR=/app/rag_data
 ```
 
-## Step 4: Ensure rag_data is Deployed
+## Step 4: RAG Documents Location
 
-Make sure the `rag_data/` folder is included in your Node.js deployment:
+RAG documents are already included in `server/data/rag_docs/`:
+- `external_benchmarks.md` - NSCLC survival benchmarks
+- `TSD14-Survival-analysis.pdf` - NICE methodology
+- `TSD16_Treatment_Switching.pdf` - Treatment switching guidance
+- `TSD19-Partitioned-Survival-Analysis.pdf` - Partitioned survival
+- `TSD21-Flex-Surv.pdf` - Flexible survival models
+- Trial PDFs (KEYNOTE, CheckMate)
 
-```dockerfile
-# In your Dockerfile, ensure rag_data is copied
-COPY rag_data ./rag_data
-```
-
-Or in your `railway.json`:
-```json
-{
-  "build": {
-    "builder": "NIXPACKS"
-  }
-}
-```
-(Nixpacks will include all files by default)
+These are automatically deployed with your Node.js service - no additional configuration needed.
 
 ## Step 5: Trigger RAG Ingestion
 
