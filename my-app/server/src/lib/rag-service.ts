@@ -160,28 +160,43 @@ export class RAGService {
 
     try {
       const files = await fs.readdir(ragDir);
+      console.log(`[RAG] Found ${files.length} files in ${ragDir}`);
       
       for (const file of files) {
         const filePath = path.join(ragDir, file);
         const stats = await fs.stat(filePath);
         
-        if (!stats.isFile()) continue;
+        if (!stats.isFile()) {
+          console.log(`[RAG] Skipping non-file: ${file}`);
+          continue;
+        }
         
         let content = '';
         let documentType: 'pdf' | 'markdown' | 'text' = 'text';
         
+        console.log(`[RAG] Processing file: ${file}`);
+        
         if (file.endsWith('.pdf')) {
           content = await this.extractPdfText(filePath);
           documentType = 'pdf';
+          console.log(`[RAG] PDF ${file}: extracted ${content.length} chars`);
         } else if (file.endsWith('.md')) {
           content = await fs.readFile(filePath, 'utf-8');
           documentType = 'markdown';
+          console.log(`[RAG] Markdown ${file}: ${content.length} chars`);
         } else if (file.endsWith('.txt')) {
           content = await fs.readFile(filePath, 'utf-8');
           documentType = 'text';
+          console.log(`[RAG] Text ${file}: ${content.length} chars`);
+        } else {
+          console.log(`[RAG] Skipping unsupported file type: ${file}`);
+          continue;
         }
         
-        if (!content) continue;
+        if (!content) {
+          console.log(`[RAG] No content extracted from: ${file}`);
+          continue;
+        }
         
         // Chunk the content
         const chunks = this.chunkText(content);

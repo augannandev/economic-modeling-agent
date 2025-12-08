@@ -1356,11 +1356,17 @@ api.post('/rag/ingest', async (c) => {
     }
     
     console.log(`[RAG] Ingesting documents from: ${ragDir}`);
+    
+    // List files in directory for debugging
+    const dirFiles = await fs.readdir(ragDir);
+    console.log(`[RAG] Files found: ${dirFiles.join(', ')}`);
+    
     const result = await ragService.ingestDocuments(ragDir);
     
     return c.json({
       success: result.success,
       ragDir,
+      filesInDir: dirFiles,
       documentsProcessed: result.documentsProcessed,
       chunksCreated: result.chunksCreated,
       checkedPaths,
