@@ -286,6 +286,7 @@ write.csv(chemo_fits$results, "chemo_model_comparison.csv", row.names = FALSE)`;
  * Generate R code for plotting
  */
 export function generatePlottingCode(_params: CodeGeneratorParams): string {
+  void _params; // Parameter kept for API consistency with other generators
   return `# Survival Curve Plotting
 # KM curves with parametric model overlays
 # ==========================================
