@@ -1375,39 +1375,43 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
         </DropdownMenu>
       </div>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span className="w-1 h-5 bg-primary rounded-full" />
             Primary Recommendation
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <CompactMarkdown content={synthesis.primary_recommendation || 'Not available'} />
+        <CardContent className="overflow-x-auto">
+          <div className="min-w-0">
+            <CompactMarkdown content={synthesis.primary_recommendation || 'Not available'} />
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span className="w-1 h-5 bg-amber-500 rounded-full" />
             Key Uncertainties
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <CompactMarkdown content={synthesis.key_uncertainties || 'Not available'} />
+        <CardContent className="overflow-x-auto">
+          <div className="min-w-0">
+            <CompactMarkdown content={synthesis.key_uncertainties || 'Not available'} />
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span className="w-1 h-5 bg-blue-500 rounded-full" />
             Full Report
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="max-h-[600px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
+        <CardContent className="overflow-x-auto">
+          <div className="max-h-[600px] overflow-y-auto pr-2 min-w-0">
             <Markdown content={synthesis.full_text || ''} />
           </div>
         </CardContent>
