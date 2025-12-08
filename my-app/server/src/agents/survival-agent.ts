@@ -61,6 +61,45 @@ const SCALES: Array<'hazard' | 'odds' | 'normal'> = ['hazard', 'odds', 'normal']
 const KNOTS: Array<1 | 2 | 3> = [1, 2, 3];
 
 /**
+ * Helper to map VisionAssessmentResult to database format
+ * The interface was updated but database schema uses older field names
+ */
+function mapVisionToDbFormat(vision: any): {
+  short_term_observations: string;
+  long_term_observations: string;
+  strengths: string;
+  weaknesses: string;
+  concerns: string;
+} {
+  // Build short-term observations from early/mid/late periods
+  const shortTermObs = [
+    vision.observations?.early?.fit_quality,
+    vision.observations?.mid?.fit_quality,
+    vision.observations?.late?.fit_quality,
+  ].filter(Boolean).join('; ') || '';
+  
+  // Build long-term observations from extrapolation
+  const longTermObs = [
+    vision.observations?.extrapolation?.trajectory,
+    vision.observations?.extrapolation?.plausibility,
+  ].filter(Boolean).join('; ') || '';
+  
+  // Concerns from red_flags and extrapolation concerns
+  const concerns = [
+    ...(vision.red_flags || []),
+    ...(vision.observations?.extrapolation?.concerns || []),
+  ].join('; ') || '';
+  
+  return {
+    short_term_observations: shortTermObs,
+    long_term_observations: longTermObs,
+    strengths: Array.isArray(vision.strengths) ? vision.strengths.join('; ') : (vision.strengths || ''),
+    weaknesses: Array.isArray(vision.weaknesses) ? vision.weaknesses.join('; ') : (vision.weaknesses || ''),
+    concerns,
+  };
+}
+
+/**
  * Helper to check if analysis is paused
  * If paused, it waits until resumed or cancelled
  */
@@ -244,12 +283,16 @@ async function fitOnePieceModels(state: SurvivalAnalysisState): Promise<Partial<
           plotResults.long_term.base64_data,
           {
             arm,
-            approach: 'one-piece',
+            endpoint: state.endpointType,
+            approach: 'One-piece',
             distribution,
             aic: modelResult.aic,
             bic: modelResult.bic,
           }
         );
+
+        // Map vision assessment to database format
+        const visionDbData = mapVisionToDbFormat(visionAssessment);
 
         // Save vision assessment
         const visionId = randomUUID();
@@ -258,11 +301,11 @@ async function fitOnePieceModels(state: SurvivalAnalysisState): Promise<Partial<
           model_id: modelId,
           short_term_score: visionAssessment.short_term_score,
           long_term_score: visionAssessment.long_term_score,
-          short_term_observations: visionAssessment.short_term_observations,
-          long_term_observations: visionAssessment.long_term_observations,
-          strengths: visionAssessment.strengths,
-          weaknesses: visionAssessment.weaknesses,
-          concerns: visionAssessment.concerns,
+          short_term_observations: visionDbData.short_term_observations,
+          long_term_observations: visionDbData.long_term_observations,
+          strengths: visionDbData.strengths,
+          weaknesses: visionDbData.weaknesses,
+          concerns: visionDbData.concerns,
           token_usage: visionAssessment.token_usage.input + visionAssessment.token_usage.output,
         });
 
@@ -410,12 +453,17 @@ async function fitPiecewiseModels(state: SurvivalAnalysisState): Promise<Partial
           plotResults.long_term.base64_data,
           {
             arm,
-            approach: 'piecewise',
+            endpoint: state.endpointType,
+            approach: 'Piecewise',
             distribution,
             aic: modelResult.aic,
             bic: modelResult.bic,
+            cutpoint,
           }
         );
+
+        // Map vision assessment to database format
+        const visionDbData = mapVisionToDbFormat(visionAssessment);
 
         // Save vision assessment
         await db.insert(visionAssessments).values({
@@ -423,11 +471,11 @@ async function fitPiecewiseModels(state: SurvivalAnalysisState): Promise<Partial
           model_id: modelId,
           short_term_score: visionAssessment.short_term_score,
           long_term_score: visionAssessment.long_term_score,
-          short_term_observations: visionAssessment.short_term_observations,
-          long_term_observations: visionAssessment.long_term_observations,
-          strengths: visionAssessment.strengths,
-          weaknesses: visionAssessment.weaknesses,
-          concerns: visionAssessment.concerns,
+          short_term_observations: visionDbData.short_term_observations,
+          long_term_observations: visionDbData.long_term_observations,
+          strengths: visionDbData.strengths,
+          weaknesses: visionDbData.weaknesses,
+          concerns: visionDbData.concerns,
           token_usage: visionAssessment.token_usage.input + visionAssessment.token_usage.output,
         });
 
@@ -575,12 +623,17 @@ async function fitSplineModels(state: SurvivalAnalysisState): Promise<Partial<Su
             plotResults.long_term.base64_data,
             {
               arm,
-              approach: 'spline',
-              distribution: `${scale}-scale`,
+              endpoint: state.endpointType,
+              approach: 'Spline',
+              distribution: `${scale}-scale (${knots} knots)`,
               aic: modelResult.aic,
               bic: modelResult.bic,
+              scale,
             }
           );
+
+          // Map vision assessment to database format
+          const visionDbData = mapVisionToDbFormat(visionAssessment);
 
           // Save vision assessment
           await db.insert(visionAssessments).values({
@@ -588,11 +641,11 @@ async function fitSplineModels(state: SurvivalAnalysisState): Promise<Partial<Su
             model_id: modelId,
             short_term_score: visionAssessment.short_term_score,
             long_term_score: visionAssessment.long_term_score,
-            short_term_observations: visionAssessment.short_term_observations,
-            long_term_observations: visionAssessment.long_term_observations,
-            strengths: visionAssessment.strengths,
-            weaknesses: visionAssessment.weaknesses,
-            concerns: visionAssessment.concerns,
+            short_term_observations: visionDbData.short_term_observations,
+            long_term_observations: visionDbData.long_term_observations,
+            strengths: visionDbData.strengths,
+            weaknesses: visionDbData.weaknesses,
+            concerns: visionDbData.concerns,
             token_usage: visionAssessment.token_usage.input + visionAssessment.token_usage.output,
           });
 
