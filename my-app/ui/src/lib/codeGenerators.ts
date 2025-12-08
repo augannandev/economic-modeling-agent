@@ -135,6 +135,7 @@ export function generateModelFittingCode(params: CodeGeneratorParams): string {
   };
 
   const distList = distributions
+    .filter(d => d != null)  // Filter out null/undefined distributions
     .map(d => distMapping[d.toLowerCase()] || d)
     .filter((v, i, a) => a.indexOf(v) === i); // unique
 

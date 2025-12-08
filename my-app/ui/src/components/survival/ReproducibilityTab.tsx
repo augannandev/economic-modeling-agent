@@ -137,9 +137,9 @@ export function ReproducibilityTab({ analysisId, models, armData }: Reproducibil
   const [activeTab, setActiveTab] = useState('ipd');
   const [downloading, setDownloading] = useState(false);
 
-  // Generate code params from models
+  // Generate code params from models (filter out null distributions like spline models)
   const codeParams: CodeGeneratorParams = {
-    distributions: [...new Set(models.map(m => m.distribution))],
+    distributions: [...new Set(models.map(m => m.distribution).filter(Boolean))] as string[],
     arms: ['pembro', 'chemo'],
     armLabels: { pembro: 'Pembrolizumab', chemo: 'Chemotherapy' },
     armData: armData || {
