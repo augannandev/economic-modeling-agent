@@ -159,13 +159,13 @@ export function SurvivalAnalysis() {
   const currentStepIndex = getStepIndex(selectedAnalysis?.workflow_state || null);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)]">
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
       {/* Main Content */}
       <div className={cn(
-        "flex-1 overflow-y-auto transition-all duration-300",
+        "flex-1 min-w-0 overflow-y-auto transition-all duration-300",
         isChatOpen ? "mr-96" : ""
       )}>
-        <div className="container mx-auto p-6 space-y-6">
+        <div className="max-w-full p-6 space-y-6 mx-auto" style={{ maxWidth: 'min(100%, 1400px)' }}>
           {/* Header */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
             <div>
@@ -368,7 +368,7 @@ export function SurvivalAnalysis() {
                 )}
 
                 {/* Tabs */}
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full overflow-hidden">
                   <TabsList>
                     <TabsTrigger value="overview">Overview</TabsTrigger>
                     <TabsTrigger value="ph-tests">PH Tests</TabsTrigger>
@@ -402,7 +402,7 @@ export function SurvivalAnalysis() {
                     <ModelsTab analysisId={selectedAnalysis.id} />
                   </TabsContent>
 
-                  <TabsContent value="synthesis" className="space-y-4">
+                  <TabsContent value="synthesis" className="space-y-4 overflow-hidden">
                     <SynthesisTab analysisId={selectedAnalysis.id} />
                   </TabsContent>
 
@@ -1343,7 +1343,7 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
   if (!synthesis) return <div className="text-muted-foreground">No synthesis report available yet.</div>;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full max-w-full overflow-hidden">
       {/* Download Options */}
       <div className="flex justify-end">
         <DropdownMenu>
