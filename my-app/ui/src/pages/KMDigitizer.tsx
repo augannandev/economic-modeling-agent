@@ -977,10 +977,55 @@ export function KMDigitizer() {
 
               <TabsContent value="pdf">
                 <PDFViewer 
-                    onScreenshotCapture={(_screenshot, type) => {
-                    console.log('Screenshot captured:', type);
+                  onScreenshotCapture={(screenshot, type) => {
+                    // Convert blob to File and add to the first endpoint
+                    const file = new File([screenshot], `pdf_${type}_${Date.now()}.png`, { type: 'image/png' });
+                    
+                    // Find the first endpoint that doesn't have this type of image
+                    const targetEndpointIndex = endpoints.findIndex(e => 
+                      type === 'km_plot' ? !e.kmPlot : !e.riskTable
+                    );
+                    
+                    if (targetEndpointIndex >= 0) {
+                      handleImageUpload(targetEndpointIndex, type, file);
+                    } else {
+                      // All endpoints have this type, add to first endpoint (will replace)
+                      handleImageUpload(0, type, file);
+                    }
                   }}
                 />
+                
+                {/* Show current captures status */}
+                {endpoints.some(e => e.kmPlot || e.riskTable) && (
+                  <div className="mt-4 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+                    <h4 className="font-medium text-green-900 dark:text-green-100 mb-2 flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Screenshots Captured from PDF
+                    </h4>
+                    <div className="space-y-2">
+                      {endpoints.map((endpoint, idx) => (
+                        <div key={idx} className="text-sm text-green-700 dark:text-green-300">
+                          <strong>{endpoint.endpointType}:</strong>
+                          {' '}
+                          {endpoint.kmPlot ? '✓ KM Plot' : '○ KM Plot needed'}
+                          {' | '}
+                          {endpoint.riskTable ? '✓ Risk Table' : '○ Risk Table needed'}
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {canProceedToExtraction && (
+                      <Button 
+                        onClick={handleStartExtraction} 
+                        className="mt-4 gap-2"
+                        size="lg"
+                      >
+                        <Play className="h-4 w-4" />
+                        Extract All Curves (Granularity: {granularity}mo)
+                      </Button>
+                    )}
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </CardContent>
