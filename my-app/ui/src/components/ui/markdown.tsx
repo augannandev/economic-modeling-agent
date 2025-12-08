@@ -23,9 +23,10 @@ export function Markdown({ content, className }: MarkdownProps) {
   const processedContent = preprocessMarkdown(content);
 
   return (
-    <ReactMarkdown
-      className={cn('markdown-content prose prose-slate dark:prose-invert max-w-none break-words overflow-hidden', className)}
-      remarkPlugins={[remarkGfm]}
+    <div style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+      <ReactMarkdown
+        className={cn('markdown-content prose prose-slate dark:prose-invert max-w-none', className)}
+        remarkPlugins={[remarkGfm]}
       components={{
         // Headings with colored left border accent
         h1: ({ children }) => (
@@ -198,6 +199,7 @@ export function Markdown({ content, className }: MarkdownProps) {
     >
       {processedContent}
     </ReactMarkdown>
+    </div>
   );
 }
 

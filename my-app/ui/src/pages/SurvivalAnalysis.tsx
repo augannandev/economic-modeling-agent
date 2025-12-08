@@ -159,13 +159,13 @@ export function SurvivalAnalysis() {
   const currentStepIndex = getStepIndex(selectedAnalysis?.workflow_state || null);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem)]">
       {/* Main Content */}
       <div className={cn(
-        "flex-1 min-w-0 overflow-y-auto transition-all duration-300",
+        "flex-1 min-w-0 overflow-y-auto overflow-x-hidden transition-all duration-300",
         isChatOpen ? "mr-96" : ""
       )}>
-        <div className="max-w-full p-6 space-y-6 mx-auto" style={{ maxWidth: 'min(100%, 1400px)' }}>
+        <div className="container mx-auto p-6 space-y-6">
           {/* Header */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
             <div>
@@ -368,7 +368,7 @@ export function SurvivalAnalysis() {
                 )}
 
                 {/* Tabs */}
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full overflow-hidden">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                   <TabsList>
                     <TabsTrigger value="overview">Overview</TabsTrigger>
                     <TabsTrigger value="ph-tests">PH Tests</TabsTrigger>
@@ -402,7 +402,7 @@ export function SurvivalAnalysis() {
                     <ModelsTab analysisId={selectedAnalysis.id} />
                   </TabsContent>
 
-                  <TabsContent value="synthesis" className="space-y-4 overflow-hidden">
+                  <TabsContent value="synthesis" className="space-y-4">
                     <SynthesisTab analysisId={selectedAnalysis.id} />
                   </TabsContent>
 
@@ -1343,7 +1343,7 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
   if (!synthesis) return <div className="text-muted-foreground">No synthesis report available yet.</div>;
 
   return (
-    <div className="space-y-4 w-full max-w-full overflow-hidden">
+    <div className="space-y-4">
       {/* Download Options */}
       <div className="flex justify-end">
         <DropdownMenu>
@@ -1375,43 +1375,39 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
         </DropdownMenu>
       </div>
 
-      <Card className="overflow-hidden">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span className="w-1 h-5 bg-primary rounded-full" />
             Primary Recommendation
           </CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <div className="min-w-0">
-            <CompactMarkdown content={synthesis.primary_recommendation || 'Not available'} />
-          </div>
+        <CardContent>
+          <CompactMarkdown content={synthesis.primary_recommendation || 'Not available'} />
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span className="w-1 h-5 bg-amber-500 rounded-full" />
             Key Uncertainties
           </CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <div className="min-w-0">
-            <CompactMarkdown content={synthesis.key_uncertainties || 'Not available'} />
-          </div>
+        <CardContent>
+          <CompactMarkdown content={synthesis.key_uncertainties || 'Not available'} />
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span className="w-1 h-5 bg-blue-500 rounded-full" />
             Full Report
           </CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <div className="max-h-[600px] overflow-y-auto pr-2 min-w-0">
+        <CardContent>
+          <div className="max-h-[600px] overflow-y-auto pr-2">
             <Markdown content={synthesis.full_text || ''} />
           </div>
         </CardContent>
