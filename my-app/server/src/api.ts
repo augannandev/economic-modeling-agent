@@ -883,6 +883,53 @@ survivalRoutes.get('/analyses/:id/chat/stream', async (c) => {
   });
 });
 
+// Get IPD preview data (for when no analysis has been run)
+survivalRoutes.get('/ipd-preview', async (c) => {
+  try {
+    const endpoint = c.req.query('endpoint') || 'OS';
+    
+    // Get Python service URL
+    const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+    
+    console.log(`[IPD Preview] Requesting ${endpoint} preview from Python service`);
+    
+    // Call Python service for IPD preview
+    const response = await fetch(`${pythonServiceUrl}/ipd-preview?endpoint=${endpoint}`);
+    
+    if (!response.ok) {
+      console.log(`[IPD Preview] Python service returned ${response.status}`);
+      return c.json({
+        source: 'demo',
+        endpoint,
+        plot_base64: '',
+        statistics: {
+          pembro: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' },
+          chemo: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' }
+        },
+        available: false
+      });
+    }
+    
+    const data = await response.json() as Record<string, unknown>;
+    return c.json({
+      ...data,
+      available: true
+    });
+  } catch (error) {
+    console.error('[IPD Preview] Error:', error);
+    return c.json({
+      source: 'demo',
+      endpoint: c.req.query('endpoint') || 'OS',
+      plot_base64: '',
+      statistics: {
+        pembro: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' },
+        chemo: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' }
+      },
+      available: false
+    });
+  }
+});
+
 // Mount survival routes
 api.route('/survival', survivalRoutes);
 

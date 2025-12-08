@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Markdown, CompactMarkdown } from '@/components/ui/markdown';
 import { downloadPDF } from '@/lib/pdfUtils';
 import { ChatSidebar } from '@/components/chat';
-import { FinalDecisionPanel, ReproducibilityTab } from '@/components/survival';
+import { FinalDecisionPanel, ReproducibilityTab, IPDPreview } from '@/components/survival';
 import { 
   CheckCircle2, 
   Circle, 
@@ -233,6 +233,17 @@ export function SurvivalAnalysis() {
                 {error}
               </CardContent>
             </Card>
+          )}
+
+          {/* IPD Preview - Show when no analysis exists */}
+          {!selectedAnalysis && (
+            <IPDPreview 
+              onStartAnalysis={(endpoint) => {
+                setEndpointType(endpoint);
+                handleStartAnalysis();
+              }}
+              isStarting={loading}
+            />
           )}
 
           {/* Workflow Steps */}

@@ -331,7 +331,7 @@ def generate_ph_diagnostic_plots(chemo_df: pd.DataFrame, pembro_df: pd.DataFrame
         # Add LOESS trend line
         # Try using statsmodels if available, else simple rolling mean
         try:
-            from statsmodels.nonparametric.smoothers_lowess import lowess
+            from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
             # lowess returns (x, y) sorted by x
             smoothed = lowess(plot_data['resid'], plot_data['time'], frac=0.4)
             ax.plot(smoothed[:, 0], smoothed[:, 1], color='red', linewidth=3, label='LOESS Trend')

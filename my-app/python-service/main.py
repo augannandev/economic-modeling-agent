@@ -467,6 +467,183 @@ async def health_check():
     """Health check endpoint for deployment platforms"""
     return {"status": "healthy", "service": "survival-analysis-python"}
 
+@app.get("/ipd-preview")
+async def ipd_preview(endpoint: str = "OS"):
+    """
+    Get a preview of available IPD data for a given endpoint type.
+    
+    Returns:
+    - KM plot with both arms overlaid
+    - Basic statistics (N, events, median survival, follow-up)
+    - Data source (digitizer vs demo)
+    """
+    try:
+        import os
+        from pathlib import Path
+        import pandas as pd
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')
+        from lifelines import KaplanMeierFitter
+        import base64
+        from io import BytesIO
+        
+        # Data directory from environment or fallback
+        data_dir = os.getenv("DATA_DIRECTORY", "/tmp/survival_data")
+        demo_dir = Path(__file__).parent / "demo_data"
+        
+        # Track data source
+        source = "demo"
+        chemo_df = None
+        pembro_df = None
+        
+        # 1. Try to find digitizer-generated IPD first
+        digitizer_patterns = [
+            f"ipd_EndpointType.{endpoint}_Chemotherapy.parquet",
+            f"ipd_EndpointType.{endpoint}_chemotherapy.parquet",
+            f"ipd_{endpoint}_chemo*.parquet"
+        ]
+        
+        if os.path.exists(data_dir):
+            for f in Path(data_dir).glob("*.parquet"):
+                if endpoint.lower() in f.name.lower():
+                    try:
+                        df = pd.read_parquet(f)
+                        if 'chemo' in f.name.lower() or 'control' in f.name.lower():
+                            chemo_df = df
+                            source = "digitizer"
+                        elif 'pembro' in f.name.lower() or 'treatment' in f.name.lower():
+                            pembro_df = df
+                            source = "digitizer"
+                    except Exception:
+                        pass
+        
+        # 2. Fall back to demo data if not found
+        if chemo_df is None:
+            chemo_path = demo_dir / f"ipd_EndpointType.{endpoint}_Chemotherapy.parquet"
+            if chemo_path.exists():
+                chemo_df = pd.read_parquet(chemo_path)
+        
+        if pembro_df is None:
+            pembro_path = demo_dir / f"ipd_EndpointType.{endpoint}_Pembrolizumab.parquet"
+            if pembro_path.exists():
+                pembro_df = pd.read_parquet(pembro_path)
+        
+        # 3. Check if we have data
+        if chemo_df is None and pembro_df is None:
+            return {
+                "source": source,
+                "endpoint": endpoint,
+                "plot_base64": "",
+                "statistics": {
+                    "pembro": {"n": 0, "events": 0, "median": 0, "ci_lower": 0, "ci_upper": 0, "follow_up_range": "N/A"},
+                    "chemo": {"n": 0, "events": 0, "median": 0, "ci_lower": 0, "ci_upper": 0, "follow_up_range": "N/A"}
+                },
+                "available": False
+            }
+        
+        # 4. Calculate statistics
+        def calc_stats(df):
+            if df is None or len(df) == 0:
+                return {"n": 0, "events": 0, "median": 0, "ci_lower": 0, "ci_upper": 0, "follow_up_range": "N/A"}
+            
+            n = len(df)
+            events = int(df['event'].sum())
+            
+            # Fit KM for median survival
+            kmf = KaplanMeierFitter()
+            kmf.fit(df['time'], df['event'])
+            
+            median_survival = kmf.median_survival_time_
+            ci = kmf.confidence_interval_median_survival_time_
+            
+            # Handle edge cases where median may not be reached
+            median_val = float(median_survival) if not np.isinf(median_survival) else None
+            ci_lower = float(ci.iloc[0, 0]) if not np.isnan(ci.iloc[0, 0]) else None
+            ci_upper = float(ci.iloc[0, 1]) if not np.isnan(ci.iloc[0, 1]) else None
+            
+            follow_up = f"{df['time'].min():.1f} - {df['time'].max():.1f} mo"
+            
+            return {
+                "n": n,
+                "events": events,
+                "median": median_val,
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper,
+                "follow_up_range": follow_up
+            }
+        
+        pembro_stats = calc_stats(pembro_df)
+        chemo_stats = calc_stats(chemo_df)
+        
+        # 5. Generate KM plot
+        fig, ax = plt.subplots(figsize=(10, 7))
+        
+        # Plot settings
+        ax.set_xlim(0, max(
+            pembro_df['time'].max() if pembro_df is not None else 0,
+            chemo_df['time'].max() if chemo_df is not None else 0
+        ) * 1.1)
+        ax.set_ylim(0, 1.05)
+        ax.set_xlabel("Time (months)", fontsize=12)
+        ax.set_ylabel("Survival Probability", fontsize=12)
+        ax.set_title(f"{endpoint} - Reconstructed IPD Kaplan-Meier Curves", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        # Plot Pembrolizumab
+        if pembro_df is not None and len(pembro_df) > 0:
+            kmf_pembro = KaplanMeierFitter()
+            kmf_pembro.fit(pembro_df['time'], pembro_df['event'], label='Pembrolizumab')
+            kmf_pembro.plot_survival_function(ax=ax, ci_show=True, color='#FF7F0E', linewidth=2)
+        
+        # Plot Chemotherapy
+        if chemo_df is not None and len(chemo_df) > 0:
+            kmf_chemo = KaplanMeierFitter()
+            kmf_chemo.fit(chemo_df['time'], chemo_df['event'], label='Chemotherapy')
+            kmf_chemo.plot_survival_function(ax=ax, ci_show=True, color='#1F77B4', linewidth=2)
+        
+        ax.legend(loc='lower left', fontsize=11)
+        
+        # Add data source watermark
+        ax.text(0.98, 0.02, f"Source: {source.title()} Data", 
+                transform=ax.transAxes, fontsize=9, alpha=0.5, ha='right')
+        
+        plt.tight_layout()
+        
+        # Convert to base64
+        buffer = BytesIO()
+        fig.savefig(buffer, format='png', dpi=120, bbox_inches='tight')
+        buffer.seek(0)
+        plot_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        plt.close(fig)
+        
+        return {
+            "source": source,
+            "endpoint": endpoint,
+            "plot_base64": plot_base64,
+            "statistics": {
+                "pembro": pembro_stats,
+                "chemo": chemo_stats
+            },
+            "available": True
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"[IPD Preview] Error: {e}\n{traceback.format_exc()}")
+        return {
+            "source": "error",
+            "endpoint": endpoint,
+            "plot_base64": "",
+            "statistics": {
+                "pembro": {"n": 0, "events": 0, "median": 0, "ci_lower": 0, "ci_upper": 0, "follow_up_range": "N/A"},
+                "chemo": {"n": 0, "events": 0, "median": 0, "ci_lower": 0, "ci_upper": 0, "follow_up_range": "N/A"}
+            },
+            "available": False,
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", "8000"))
