@@ -205,8 +205,8 @@ def generate_ph_diagnostic_plots(chemo_df: pd.DataFrame, pembro_df: pd.DataFrame
     naf_chemo.fit(chemo_df['time'], chemo_df['event'], label='Chemotherapy')
     naf_pembro.fit(pembro_df['time'], pembro_df['event'], label='Pembrolizumab')
     
-    naf_chemo.plot_cumulative_hazard(ax=ax, linewidth=2, color='blue')
-    naf_pembro.plot_cumulative_hazard(ax=ax, linewidth=2, color='orange')
+    naf_chemo.plot_cumulative_hazard(ax=ax, linewidth=2, color='blue', ci_show=False)
+    naf_pembro.plot_cumulative_hazard(ax=ax, linewidth=2, color='orange', ci_show=False)
     
     ax.set_xlabel('Time', fontsize=12)
     ax.set_ylabel('Cumulative Hazard', fontsize=12)
