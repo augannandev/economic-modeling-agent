@@ -697,6 +697,15 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
       long_term: model.vision_assessment?.long_term_observations || '',
     },
     reasoning_summary: model.reasoning_assessment?.full_text.substring(0, 500) || '',
+    // Include recommendation for categorization
+    recommendation: model.vision_assessment?.recommendation || undefined,
+    extracted_predictions: model.vision_assessment?.extracted_predictions || undefined,
+    red_flags: model.vision_assessment?.red_flags || undefined,
+    // Include plots for base case models (will be filtered in synthesis)
+    plots: model.plots ? {
+      short_term_base64: model.plots.short_term?.base64_data,
+      long_term_base64: model.plots.long_term?.base64_data,
+    } : undefined,
   }));
 
   const synthesis = await synthesizeCrossModel(assessmentData, state.ph_tests);

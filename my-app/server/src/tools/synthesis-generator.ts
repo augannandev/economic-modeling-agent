@@ -42,12 +42,58 @@ interface ModelAssessment {
   };
   recommendation?: 'Base Case' | 'Scenario' | 'Screen Out';
   red_flags?: string[];
+  // Plot data for best models
+  plots?: {
+    short_term_base64?: string;
+    long_term_base64?: string;
+  };
 }
 
 /**
- * Get comprehensive RAG context for synthesis
+ * RAG source for citations
  */
-async function getSynthesisRAGContext(indication?: string): Promise<string> {
+interface RAGSource {
+  id: string;
+  source: string;
+  shortName: string;
+  fullName: string;
+}
+
+/**
+ * Extract short name from source filename
+ */
+function getShortSourceName(source: string): string {
+  // Extract TSD number or meaningful short name
+  if (source.includes('TSD14')) return 'TSD14';
+  if (source.includes('TSD16')) return 'TSD16';
+  if (source.includes('TSD19')) return 'TSD19';
+  if (source.includes('TSD21')) return 'TSD21';
+  if (source.includes('benchmark')) return 'Benchmarks';
+  if (source.includes('NEJM')) return 'NEJM';
+  // Default to filename without extension
+  return source.replace(/\.pdf|\.md/g, '').substring(0, 20);
+}
+
+/**
+ * Get full document title
+ */
+function getFullSourceTitle(source: string): string {
+  if (source.includes('TSD14')) return 'NICE DSU TSD14: Survival Analysis for Economic Evaluation';
+  if (source.includes('TSD16')) return 'NICE DSU TSD16: Treatment Switching Adjustments';
+  if (source.includes('TSD19')) return 'NICE DSU TSD19: Partitioned Survival Analysis';
+  if (source.includes('TSD21')) return 'NICE DSU TSD21: Flexible Methods for Survival Analysis';
+  if (source.includes('benchmark')) return 'External Survival Benchmarks';
+  if (source.includes('NEJM')) return 'NEJM Clinical Trial Publication';
+  return source;
+}
+
+/**
+ * Get comprehensive RAG context for synthesis with source tracking
+ */
+async function getSynthesisRAGContext(indication?: string): Promise<{ context: string; sources: RAGSource[] }> {
+  const sources: RAGSource[] = [];
+  let sourceId = 1;
+  
   try {
     const ragService = getRAGService();
     
@@ -67,18 +113,42 @@ async function getSynthesisRAGContext(indication?: string): Promise<string> {
     if (methodologyResults.length > 0) {
       context += '## NICE Methodology Guidance\n\n';
       for (const result of methodologyResults) {
-        context += `**[${result.source}]**\n${result.content}\n\n`;
+        const shortName = getShortSourceName(result.source);
+        const existingSource = sources.find(s => s.shortName === shortName);
+        
+        if (!existingSource) {
+          sources.push({
+            id: String(sourceId++),
+            source: result.source,
+            shortName,
+            fullName: getFullSourceTitle(result.source)
+          });
+        }
+        
+        context += `**[${shortName}]**\n${result.content}\n\n`;
       }
     }
     
     if (benchmarkResults.length > 0) {
       context += '\n## External Benchmark Data\n\n';
       for (const result of benchmarkResults) {
-        context += `**[${result.source}]**\n${result.content}\n\n`;
+        const shortName = getShortSourceName(result.source);
+        const existingSource = sources.find(s => s.shortName === shortName);
+        
+        if (!existingSource) {
+          sources.push({
+            id: String(sourceId++),
+            source: result.source,
+            shortName,
+            fullName: getFullSourceTitle(result.source)
+          });
+        }
+        
+        context += `**[${shortName}]**\n${result.content}\n\n`;
       }
     }
     
-    return context;
+    return { context, sources };
   } catch (error) {
     console.warn('[SynthesisGenerator] RAG query failed, using fallback:', error);
     
@@ -86,9 +156,12 @@ async function getSynthesisRAGContext(indication?: string): Promise<string> {
     try {
       const ragDir = path.join(process.cwd(), 'data', 'rag_docs');
       const simpleContext = await getSimpleRAGContext(ragDir, 'TSD survival model selection');
-      return `## Methodology Context\n\n${simpleContext}`;
+      return { 
+        context: `## Methodology Context\n\n${simpleContext}`,
+        sources: [{ id: '1', source: 'TSD14', shortName: 'TSD14', fullName: 'NICE DSU TSD14' }]
+      };
     } catch {
-      return '';
+      return { context: '', sources: [] };
     }
   }
 }
@@ -117,6 +190,81 @@ function buildModelSummaryTable(models: ModelAssessment[], arm: string): string 
 }
 
 /**
+ * Build comparison table for a specific approach
+ */
+function buildApproachComparisonTable(models: ModelAssessment[], approach: string): string {
+  const approachModels = models
+    .filter(m => m.approach === approach)
+    .sort((a, b) => a.aic - b.aic);
+  
+  if (approachModels.length === 0) return `*No ${approach} models available*`;
+  
+  let table = `### ${approach} Models Comparison\n\n`;
+  table += '| Model | Arm | AIC | BIC | Fit Score | Extrap Score | Recommendation |\n';
+  table += '|-------|-----|-----|-----|-----------|--------------|----------------|\n';
+  
+  for (const m of approachModels) {
+    const distribution = m.distribution || 'N/A';
+    const armLabel = m.arm === 'chemo' ? 'Chemo' : 'Pembro';
+    table += `| ${distribution} | ${armLabel} | ${m.aic.toFixed(2)} | ${m.bic.toFixed(2)} | ${m.vision_scores.short_term}/10 | ${m.vision_scores.long_term}/10 | ${m.recommendation || 'TBD'} |\n`;
+  }
+  
+  return table;
+}
+
+/**
+ * Build all three comparison tables
+ */
+function buildAllComparisonTables(models: ModelAssessment[]): string {
+  let tables = '## Statistical Comparison Tables\n\n';
+  tables += buildApproachComparisonTable(models, 'One-piece') + '\n\n';
+  tables += buildApproachComparisonTable(models, 'Piecewise') + '\n\n';
+  tables += buildApproachComparisonTable(models, 'Spline') + '\n\n';
+  return tables;
+}
+
+/**
+ * Generate references section from RAG sources
+ */
+function generateReferencesSection(sources: RAGSource[]): string {
+  if (sources.length === 0) return '';
+  
+  let refs = '\n\n## References\n\n';
+  for (const source of sources) {
+    refs += `${source.id}. **[${source.shortName}]** ${source.fullName}\n`;
+  }
+  return refs;
+}
+
+/**
+ * Generate embedded plots section for base case models
+ */
+function generatePlotsSection(baseCaseModels: ModelAssessment[]): string {
+  const modelsWithPlots = baseCaseModels.filter(m => m.plots?.short_term_base64 || m.plots?.long_term_base64);
+  
+  if (modelsWithPlots.length === 0) return '';
+  
+  let plotsSection = '\n\n## Base Case Model Plots\n\n';
+  
+  for (const model of modelsWithPlots) {
+    const armLabel = model.arm === 'chemo' ? 'Chemotherapy' : 'Pembrolizumab';
+    plotsSection += `### ${armLabel} - ${model.distribution || model.approach}\n\n`;
+    
+    if (model.plots?.short_term_base64) {
+      plotsSection += `**Short-term Fit (Observed Period)**\n\n`;
+      plotsSection += `![${armLabel} Short-term Fit](data:image/png;base64,${model.plots.short_term_base64})\n\n`;
+    }
+    
+    if (model.plots?.long_term_base64) {
+      plotsSection += `**Long-term Extrapolation**\n\n`;
+      plotsSection += `![${armLabel} Long-term Extrapolation](data:image/png;base64,${model.plots.long_term_base64})\n\n`;
+    }
+  }
+  
+  return plotsSection;
+}
+
+/**
  * Generate cross-model synthesis report (3000 words)
  */
 export async function synthesizeCrossModel(
@@ -133,8 +281,8 @@ export async function synthesizeCrossModel(
 ): Promise<SynthesisReportResult> {
   const llm = createReasoningLLM();
 
-  // Get RAG context
-  const ragContext = await getSynthesisRAGContext();
+  // Get RAG context with source tracking
+  const { context: ragContext, sources: ragSources } = await getSynthesisRAGContext();
 
   // Categorize models
   const baseCaseModels = allModelAssessments.filter(m => m.recommendation === 'Base Case');
@@ -289,6 +437,22 @@ FORMATTING REQUIREMENTS:
   const sensitivity_recommendations = extractSensitivityRecommendations(content);
   const key_uncertainties = extractSection(content, 'UNCERTAINTIES', 'SUMMARY TABLE');
   const hta_strategy = extractSection(content, 'HTA STRATEGY', 'SUMMARY');
+
+  // Append the three comparison tables
+  content += '\n\n---\n\n';
+  content += buildAllComparisonTables(allModelAssessments);
+
+  // Append base case model plots (short-term and long-term)
+  const plotsSection = generatePlotsSection(baseCaseModels);
+  if (plotsSection) {
+    content += plotsSection;
+  }
+
+  // Append references section
+  const referencesSection = generateReferencesSection(ragSources);
+  if (referencesSection) {
+    content += referencesSection;
+  }
 
   // Estimate token usage
   const inputTokens = Math.ceil(prompt.length / 4);
