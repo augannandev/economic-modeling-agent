@@ -576,76 +576,197 @@ class FinalDecisionErrorBoundary extends React.Component<
 }
 
 // Helper to find best model for an arm based on AIC (fallback)
-function findBestModelForArm(models: any[], arm: string): any | null {
-  const armModels = models.filter(m => m.arm === arm && m.aic != null);
+function findBestModelForArm(models: any[], armCode: string): any | null {
+  const armModels = models.filter(m => m.arm === armCode && m.aic != null);
   if (armModels.length === 0) return null;
   return armModels.reduce((best, current) => 
     current.aic < best.aic ? current : best
   );
 }
 
-// Distribution names that might appear in synthesis text
-const DISTRIBUTION_NAMES = [
-  'generalized-gamma', 'generalized gamma', 'gen-gamma',
-  'weibull', 'exponential', 'log-normal', 'lognormal', 'log normal',
-  'log-logistic', 'loglogistic', 'log logistic', 'gompertz'
-];
+// Known approach types
+const APPROACH_TYPES = ['one-piece', 'piecewise', 'spline'];
 
-// Helper to parse synthesis text and find recommended model for an arm
-function findRecommendedModelFromSynthesis(
-  models: any[], 
-  arm: string, 
-  synthesisText: string | null
-): any | null {
-  if (!synthesisText) return findBestModelForArm(models, arm);
+// Normalize distribution name for matching
+function normalizeDistribution(name: string): string {
+  return name.toLowerCase()
+    .replace(/[-_\s]+/g, '')  // Remove hyphens, underscores, spaces
+    .replace(/lognormal/g, 'lognormal')
+    .replace(/loglogistic/g, 'loglogistic')
+    .replace(/generalizedgamma/g, 'generalizedgamma')
+    .replace(/gengamma/g, 'generalizedgamma');
+}
+
+// Map synthesis arm label to database arm code
+function mapArmLabelToCode(armLabel: string, availableArms: string[]): string | null {
+  const label = armLabel.toLowerCase().trim();
   
-  const armModels = models.filter(m => m.arm === arm);
-  if (armModels.length === 0) return null;
+  // Direct mappings
+  const mappings: Record<string, string[]> = {
+    'chemo': ['chemotherapy', 'chemo', 'control', 'comparator', 'standard'],
+    'pembro': ['pembrolizumab', 'pembro', 'keytruda', 'treatment', 'intervention'],
+  };
   
-  // Look for arm-specific section in synthesis text
-  const armLabel = arm === 'pembro' ? 'pembrolizumab' : 'chemotherapy';
-  const text = synthesisText.toLowerCase();
+  // Try to find a match in known mappings
+  for (const [code, aliases] of Object.entries(mappings)) {
+    if (availableArms.includes(code) && aliases.some(alias => label.includes(alias))) {
+      return code;
+    }
+  }
   
-  // Try to find patterns like "Pembrolizumab: generalized-gamma" or "Pembrolizumab Arm Base Case: weibull"
-  const armSectionPatterns = [
-    new RegExp(`${armLabel}[^:]*(?:base case|recommendation)?[:\\s]+([\\w-]+)`, 'i'),
-    new RegExp(`${armLabel}[^.]*?(${DISTRIBUTION_NAMES.join('|')})`, 'i'),
-    new RegExp(`(?:base case|recommend)[^.]*${armLabel}[^.]*?(${DISTRIBUTION_NAMES.join('|')})`, 'i'),
-  ];
+  // Fallback: try partial matching with available arms
+  for (const armCode of availableArms) {
+    if (label.includes(armCode) || armCode.includes(label.substring(0, 4))) {
+      return armCode;
+    }
+  }
   
-  for (const pattern of armSectionPatterns) {
-    const match = synthesisText.match(pattern);
-    if (match) {
-      const modelName = match[1]?.toLowerCase().trim();
-      // Find matching model
-      const matchingModel = armModels.find(m => {
-        const dist = (m.distribution || '').toLowerCase();
-        return dist.includes(modelName) || modelName.includes(dist) ||
-          dist.replace(/-/g, ' ') === modelName.replace(/-/g, ' ');
+  return null;
+}
+
+// Parse model recommendation string like "Log-normal piecewise" or "Exponential piecewise"
+function parseModelRecommendation(modelStr: string): { distribution: string | null; approach: string | null } {
+  const lower = modelStr.toLowerCase().trim();
+  
+  // Find approach type
+  let approach: string | null = null;
+  for (const approachType of APPROACH_TYPES) {
+    if (lower.includes(approachType.replace('-', ''))) {
+      approach = approachType;
+      break;
+    }
+  }
+  
+  // If no approach found, default to one-piece
+  if (!approach) {
+    approach = 'one-piece';
+  }
+  
+  // Extract distribution (everything except the approach)
+  let distribution = lower;
+  for (const approachType of APPROACH_TYPES) {
+    distribution = distribution.replace(approachType.replace('-', ''), '').replace(approachType, '');
+  }
+  distribution = distribution.trim().replace(/[-\s]+$/, '').replace(/^[-\s]+/, '');
+  
+  return { distribution: distribution || null, approach };
+}
+
+// Interface for parsed recommendation
+interface ParsedRecommendation {
+  armLabel: string;       // Display name from synthesis (e.g., "Pembrolizumab")
+  armCode: string;        // Database code (e.g., "pembro")
+  distribution: string;   // e.g., "exponential"
+  approach: string;       // e.g., "piecewise"
+  model: any;             // Matched model from database
+  reasoning: string;      // Extracted reasoning from synthesis
+}
+
+// Parse all recommendations from synthesis text
+function parseAllRecommendations(
+  synthesisText: string | null,
+  models: any[]
+): ParsedRecommendation[] {
+  if (!synthesisText || models.length === 0) return [];
+  
+  const recommendations: ParsedRecommendation[] = [];
+  const availableArms = [...new Set(models.map(m => m.arm))];
+  
+  // Regex to match: **Arm Name Arm**: **Model Name** or **Arm Name Arm: Model Name**
+  // Pattern captures: (1) arm name, (2) model recommendation
+  const pattern = /\*\*([^*:]+?)\s*Arm\*\*:\s*\*\*([^*]+)\*\*/gi;
+  
+  let match;
+  while ((match = pattern.exec(synthesisText)) !== null) {
+    const armLabel = match[1].trim();
+    const modelStr = match[2].trim();
+    
+    // Map arm label to database code
+    const armCode = mapArmLabelToCode(armLabel, availableArms);
+    if (!armCode) {
+      console.log(`[FinalDecision] Could not map arm label "${armLabel}" to any known arm`);
+      continue;
+    }
+    
+    // Parse the model recommendation
+    const { distribution, approach } = parseModelRecommendation(modelStr);
+    if (!distribution) {
+      console.log(`[FinalDecision] Could not parse distribution from "${modelStr}"`);
+      continue;
+    }
+    
+    // Find matching model in database
+    const armModels = models.filter(m => m.arm === armCode);
+    const normalizedDist = normalizeDistribution(distribution);
+    
+    let matchedModel = armModels.find(m => {
+      const modelDist = normalizeDistribution(m.distribution || '');
+      const modelApproach = (m.approach || '').toLowerCase();
+      return modelDist === normalizedDist && modelApproach === approach;
+    });
+    
+    // If no exact match, try matching just distribution
+    if (!matchedModel) {
+      matchedModel = armModels.find(m => {
+        const modelDist = normalizeDistribution(m.distribution || '');
+        return modelDist === normalizedDist;
       });
-      if (matchingModel) {
-        console.log(`[FinalDecision] Found recommended model for ${arm}:`, matchingModel.distribution);
-        return matchingModel;
+    }
+    
+    // Fallback to best AIC for this arm
+    if (!matchedModel) {
+      console.log(`[FinalDecision] No model match for ${armLabel} (${distribution} ${approach}), using best AIC`);
+      matchedModel = findBestModelForArm(models, armCode);
+    }
+    
+    if (matchedModel) {
+      // Extract reasoning for this arm from synthesis text
+      const reasoningPattern = new RegExp(
+        `\\*\\*${armLabel}\\s*Arm\\*\\*:[^*]*\\*\\*[^*]+\\*\\*\\s*([^*]+?)(?=\\*\\*|$)`,
+        'i'
+      );
+      const reasoningMatch = synthesisText.match(reasoningPattern);
+      const reasoning = reasoningMatch?.[1]?.trim().substring(0, 300) || 
+        `${distribution} ${approach} recommended for ${armLabel}`;
+      
+      recommendations.push({
+        armLabel,
+        armCode,
+        distribution: matchedModel.distribution || distribution,
+        approach: matchedModel.approach || approach,
+        model: matchedModel,
+        reasoning
+      });
+      
+      console.log(`[FinalDecision] Parsed recommendation for ${armLabel}:`, {
+        distribution: matchedModel.distribution,
+        approach: matchedModel.approach,
+        modelId: matchedModel.id
+      });
+    }
+  }
+  
+  // If no recommendations found via regex, fallback to best AIC for all arms
+  if (recommendations.length === 0) {
+    console.log('[FinalDecision] No recommendations parsed, falling back to best AIC per arm');
+    for (const armCode of availableArms) {
+      const bestModel = findBestModelForArm(models, armCode);
+      if (bestModel) {
+        const armLabel = armCode === 'pembro' ? 'Pembrolizumab' : 
+                        armCode === 'chemo' ? 'Chemotherapy' : armCode;
+        recommendations.push({
+          armLabel,
+          armCode,
+          distribution: bestModel.distribution || bestModel.approach,
+          approach: bestModel.approach,
+          model: bestModel,
+          reasoning: 'Selected based on best statistical fit (lowest AIC)'
+        });
       }
     }
   }
   
-  // Fallback: find any distribution mentioned in the text and match to arm's models
-  for (const distName of DISTRIBUTION_NAMES) {
-    if (text.includes(distName.toLowerCase())) {
-      const matchingModel = armModels.find(m => {
-        const dist = (m.distribution || '').toLowerCase().replace(/-/g, '');
-        return dist.includes(distName.replace(/-/g, '').replace(/ /g, ''));
-      });
-      if (matchingModel) {
-        return matchingModel;
-      }
-    }
-  }
-  
-  // Ultimate fallback: best AIC
-  console.log(`[FinalDecision] Could not parse recommendation for ${arm}, using best AIC`);
-  return findBestModelForArm(models, arm);
+  return recommendations;
 }
 
 // Final Decision Tab Component
@@ -709,57 +830,30 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
     );
   }
 
-  // Find recommended models from synthesis (parses the synthesis text)
-  const recommendedPembroModel = findRecommendedModelFromSynthesis(models, 'pembro', synthesis?.primary_recommendation);
-  const recommendedChemoModel = findRecommendedModelFromSynthesis(models, 'chemo', synthesis?.primary_recommendation);
+  // Parse all recommendations from synthesis text (dynamic, works for any arms)
+  const parsedRecommendations = parseAllRecommendations(synthesis?.primary_recommendation, models);
 
-  // Generate recommendations based on synthesis analysis
-  const recommendations = synthesis?.primary_recommendation && (recommendedPembroModel || recommendedChemoModel)
-    ? [
-        recommendedPembroModel && {
-          arm: 'Pembrolizumab',
-          recommended_model: recommendedPembroModel.distribution || recommendedPembroModel.approach,
-          recommended_approach: recommendedPembroModel.approach,
-          model_id: recommendedPembroModel.id,
-          confidence: 0.85,
-          reasoning: synthesis.primary_recommendation?.substring(0, 300) || 
-            'Selected based on synthesis analysis',
-          alternatives: models
-            .filter(m => m.arm === 'pembro' && m.id !== recommendedPembroModel.id)
-            .sort((a, b) => (a.aic || Infinity) - (b.aic || Infinity))
-            .slice(0, 3)
-            .map(m => ({
-              model_id: m.id,
-              model_name: m.distribution || m.approach,
-              approach: m.approach,
-              score: m.aic && recommendedPembroModel.aic 
-                ? Math.max(1, 10 - Math.min(9, (m.aic - recommendedPembroModel.aic) / 50)) 
-                : 5,
-            })),
-        },
-        recommendedChemoModel && {
-          arm: 'Chemotherapy',
-          recommended_model: recommendedChemoModel.distribution || recommendedChemoModel.approach,
-          recommended_approach: recommendedChemoModel.approach,
-          model_id: recommendedChemoModel.id,
-          confidence: 0.78,
-          reasoning: synthesis.primary_recommendation?.substring(0, 300) || 
-            'Selected based on synthesis analysis',
-          alternatives: models
-            .filter(m => m.arm === 'chemo' && m.id !== recommendedChemoModel.id)
-            .sort((a, b) => (a.aic || Infinity) - (b.aic || Infinity))
-            .slice(0, 3)
-            .map(m => ({
-              model_id: m.id,
-              model_name: m.distribution || m.approach,
-              approach: m.approach,
-              score: m.aic && recommendedChemoModel.aic 
-                ? Math.max(1, 10 - Math.min(9, (m.aic - recommendedChemoModel.aic) / 50)) 
-                : 5,
-            })),
-        },
-      ].filter(Boolean)
-    : [];
+  // Generate recommendations for the FinalDecisionPanel
+  const recommendations = parsedRecommendations.map((rec, index) => ({
+    arm: rec.armLabel,
+    recommended_model: rec.distribution || rec.approach,
+    recommended_approach: rec.approach,
+    model_id: rec.model.id,
+    confidence: index === 0 ? 0.85 : 0.78,  // Slight variation in confidence
+    reasoning: rec.reasoning,
+    alternatives: models
+      .filter(m => m.arm === rec.armCode && m.id !== rec.model.id)
+      .sort((a, b) => (a.aic || Infinity) - (b.aic || Infinity))
+      .slice(0, 3)
+      .map(m => ({
+        model_id: m.id,
+        model_name: m.distribution || m.approach,
+        approach: m.approach,
+        score: m.aic && rec.model.aic 
+          ? Math.max(1, 10 - Math.min(9, (m.aic - rec.model.aic) / 50)) 
+          : 5,
+      })),
+  }));
 
   if (recommendations.length === 0) {
     return (
@@ -769,6 +863,17 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
     );
   }
 
+  // Build arm code to label mapping from parsed recommendations
+  const armCodeToLabel: Record<string, string> = {};
+  parsedRecommendations.forEach(rec => {
+    armCodeToLabel[rec.armCode] = rec.armLabel;
+  });
+  // Fallback mappings for arms not in recommendations
+  const defaultArmLabels: Record<string, string> = {
+    'pembro': 'Pembrolizumab',
+    'chemo': 'Chemotherapy',
+  };
+
   return (
     <FinalDecisionErrorBoundary>
       <FinalDecisionPanel
@@ -776,8 +881,7 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
         recommendations={recommendations}
         allModels={models.map(m => ({
           id: m.id,
-          arm: m.arm === 'pembro' ? 'Pembrolizumab' : 
-               m.arm === 'chemo' ? 'Chemotherapy' : m.arm,
+          arm: armCodeToLabel[m.arm] || defaultArmLabels[m.arm] || m.arm,
           approach: m.approach,
           distribution: m.distribution,
           aic: m.aic,
