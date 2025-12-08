@@ -5,8 +5,15 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5500';
 
 // Log the API URL at startup for debugging
 if (typeof window !== 'undefined') {
-  console.log('[SurvivalAPI] API_BASE_URL:', API_BASE_URL || '(empty - using relative URLs)');
+  console.log('[SurvivalAPI] API_BASE_URL:', API_BASE_URL);
   console.log('[SurvivalAPI] VITE_API_URL env:', import.meta.env.VITE_API_URL || '(not set)');
+  
+  // Warn if in production without VITE_API_URL set
+  const isProduction = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
+  if (isProduction && API_BASE_URL.includes('localhost')) {
+    console.warn('[SurvivalAPI] WARNING: Running in production but VITE_API_URL is not set. API calls and images may fail.');
+    console.warn('[SurvivalAPI] Set VITE_API_URL in your Vercel environment variables to point to your backend API.');
+  }
 }
 
 export interface Analysis {

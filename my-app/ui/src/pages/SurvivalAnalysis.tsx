@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { survivalApi, type Analysis, type AnalysisStatus } from '@/lib/survivalApi';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -628,10 +628,66 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
   );
 }
 
+// Error Boundary for catching render errors
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ReproducibilityErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  ErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('ReproducibilityTab error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-destructive mb-4">
+              <AlertCircle className="h-5 w-5" />
+              <span className="font-semibold">Failed to load Reproducibility tab</span>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              There was an error rendering the reproducibility content. This may be due to a browser compatibility issue.
+            </p>
+            <p className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded">
+              {this.state.error?.message || 'Unknown error'}
+            </p>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="mt-4"
+              onClick={() => this.setState({ hasError: false, error: null })}
+            >
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 // Reproducibility Tab Wrapper Component
 function ReproducibilityTabWrapper({ analysisId }: { analysisId: string }) {
   const [models, setModels] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadModels();
@@ -639,10 +695,12 @@ function ReproducibilityTabWrapper({ analysisId }: { analysisId: string }) {
 
   const loadModels = async () => {
     try {
+      setError(null);
       const data = await survivalApi.listModels(analysisId);
       setModels(data.models);
     } catch (err) {
       console.error('Failed to load models for reproducibility:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load models');
     } finally {
       setLoading(false);
     }
@@ -650,6 +708,23 @@ function ReproducibilityTabWrapper({ analysisId }: { analysisId: string }) {
 
   if (loading) {
     return <div className="text-center py-8">Loading...</div>;
+  }
+
+  if (error) {
+    return (
+      <Card className="border-destructive">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2 text-destructive mb-2">
+            <AlertCircle className="h-5 w-5" />
+            <span className="font-semibold">Failed to load reproducibility data</span>
+          </div>
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => { setLoading(true); loadModels(); }}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   // Calculate arm data from models
@@ -667,19 +742,21 @@ function ReproducibilityTabWrapper({ analysisId }: { analysisId: string }) {
   };
 
   return (
-    <ReproducibilityTab
-      analysisId={analysisId}
-      models={models.map(m => ({
-        id: m.id,
-        arm: m.arm,
-        approach: m.approach,
-        distribution: m.distribution,
-        aic: m.aic,
-        bic: m.bic,
-        parameters: m.parameters
-      }))}
-      armData={armData}
-    />
+    <ReproducibilityErrorBoundary>
+      <ReproducibilityTab
+        analysisId={analysisId}
+        models={models.map(m => ({
+          id: m.id,
+          arm: m.arm,
+          approach: m.approach,
+          distribution: m.distribution,
+          aic: m.aic,
+          bic: m.bic,
+          parameters: m.parameters
+        }))}
+        armData={armData}
+      />
+    </ReproducibilityErrorBoundary>
   );
 }
 
