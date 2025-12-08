@@ -303,15 +303,7 @@ export function SurvivalAnalysis() {
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="flex items-center gap-3">
-                      <CardTitle>Analysis: {selectedAnalysis.id.substring(0, 8)}...</CardTitle>
-                      <span className={cn(
-                        "px-2 py-0.5 text-xs font-medium rounded-full border",
-                        selectedAnalysis.parameters?.endpointType === 'PFS'
-                          ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300'
-                          : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300'
-                      )}>
-                        {selectedAnalysis.parameters?.endpointType || 'OS'}
-                      </span>
+                      <CardTitle>{selectedAnalysis.parameters?.endpointType || 'OS'} Analysis</CardTitle>
                       <span className={cn(
                         "px-2 py-0.5 text-xs font-medium rounded-full",
                         selectedAnalysis.status === 'completed' && 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300',
