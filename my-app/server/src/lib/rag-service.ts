@@ -77,6 +77,8 @@ export class RAGService {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     
+    console.log(`[RAG] Initializing ChromaDB at: ${process.env.CHROMA_URL || 'http://localhost:8000'}`);
+    
     try {
       // Try to get existing collection
       this.collection = await this.client.getOrCreateCollection({
@@ -90,6 +92,7 @@ export class RAGService {
       console.log('[RAG] Initialized ChromaDB collection:', this.collectionName);
     } catch (error) {
       console.error('[RAG] Failed to initialize ChromaDB:', error);
+      console.error('[RAG] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
       // Continue without RAG - graceful degradation
       this.initialized = false;
     }
@@ -147,13 +150,16 @@ export class RAGService {
   /**
    * Ingest documents from a directory
    */
-  async ingestDocuments(ragDir: string): Promise<{ success: boolean; documentsProcessed: number; chunksCreated: number }> {
+  async ingestDocuments(ragDir: string): Promise<{ success: boolean; documentsProcessed: number; chunksCreated: number; error?: string }> {
+    console.log('[RAG] Starting ingestion...');
     await this.initialize();
     
     if (!this.collection) {
       console.warn('[RAG] Collection not available, skipping ingestion');
-      return { success: false, documentsProcessed: 0, chunksCreated: 0 };
+      return { success: false, documentsProcessed: 0, chunksCreated: 0, error: 'ChromaDB collection not initialized' };
     }
+    
+    console.log('[RAG] Collection initialized, proceeding with ingestion');
 
     let documentsProcessed = 0;
     let chunksCreated = 0;

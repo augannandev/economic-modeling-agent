@@ -1369,6 +1369,7 @@ api.post('/rag/ingest', async (c) => {
       filesInDir: dirFiles,
       documentsProcessed: result.documentsProcessed,
       chunksCreated: result.chunksCreated,
+      error: (result as any).error,
       checkedPaths,
     });
   } catch (error) {

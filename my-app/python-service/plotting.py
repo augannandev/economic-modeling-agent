@@ -207,14 +207,13 @@ def _generate_actual_model_predictions(
                     raise ValueError(f"Unknown distribution: {distribution}")
                     
             elif approach == 'piecewise':
-                # Refit piecewise model
+                # Piecewise model: use ORIGINAL KM for pre-cutpoint, parametric for post-cutpoint
                 if cutpoint is None:
                     raise ValueError("Cutpoint required for piecewise model")
                 
-                # Pre-cutpoint: use KM
-                pre_data = df[df['time'] <= cutpoint].copy()
-                kmf_pre = KaplanMeierFitter()
-                kmf_pre.fit(pre_data['time'], pre_data['event'])
+                # Get original KM data to use directly for pre-cutpoint
+                km_times = np.array(km_data.get('times', []))
+                km_survival = np.array(km_data.get('survival', []))
                 
                 # Post-cutpoint: fit parametric model
                 post_data = df[df['time'] > cutpoint].copy()
@@ -240,13 +239,19 @@ def _generate_actual_model_predictions(
                     # Combine predictions
                     model_survival = np.zeros_like(prediction_times)
                     
-                    # Pre-cutpoint: use KM
+                    # Pre-cutpoint: use ORIGINAL KM data directly (not re-fitted)
+                    # This ensures the model line exactly matches the observed KM curve
                     pre_mask = prediction_times <= cutpoint
                     pre_times = prediction_times[pre_mask]
-                    if len(kmf_pre.survival_function_) > 0:
-                        # Use survival_function_at_times to preserve step function nature of KM
-                        km_surv = kmf_pre.survival_function_at_times(pre_times).values
-                        model_survival[pre_mask] = km_surv
+                    if len(km_times) > 0 and len(km_survival) > 0:
+                        # Interpolate from original KM data to get exact match
+                        model_survival[pre_mask] = np.interp(
+                            pre_times, 
+                            km_times, 
+                            km_survival,
+                            left=1.0,  # Start at 1.0
+                            right=km_survival[km_times <= cutpoint][-1] if np.any(km_times <= cutpoint) else km_survival[-1]
+                        )
                     
                     # Post-cutpoint: use parametric model
                     post_mask = prediction_times > cutpoint
@@ -323,13 +328,18 @@ def _generate_actual_model_predictions(
                     # For piecewise, we need to handle KM pre-cutpoint and R post-cutpoint
                     model_survival = np.zeros_like(prediction_times)
                     
-                    # Pre-cutpoint: use KM
+                    # Pre-cutpoint: use ORIGINAL KM data directly
                     pre_mask = prediction_times <= cutpoint
                     pre_times = prediction_times[pre_mask]
-                    if len(kmf_pre.survival_function_) > 0:
-                        # Use survival_function_at_times to preserve step function nature of KM
-                        km_surv = kmf_pre.survival_function_at_times(pre_times).values
-                        model_survival[pre_mask] = km_surv
+                    if len(km_times) > 0 and len(km_survival) > 0:
+                        # Interpolate from original KM data to get exact match
+                        model_survival[pre_mask] = np.interp(
+                            pre_times, 
+                            km_times, 
+                            km_survival,
+                            left=1.0,
+                            right=km_survival[km_times <= cutpoint][-1] if np.any(km_times <= cutpoint) else km_survival[-1]
+                        )
                     
                     # Post-cutpoint: use R service for Gompertz
                     post_mask = prediction_times > cutpoint

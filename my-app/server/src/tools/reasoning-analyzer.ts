@@ -142,31 +142,33 @@ ${benchmarkComparison.notes || 'No benchmark data'}
 
 ${ragContext}
 
-## OUTPUT FORMAT (EXACTLY 200 WORDS)
+## OUTPUT FORMAT
 
-**Statistical Fit (50 words):**
-Is AIC competitive among the 6 distributions? Does visual tracking match KM well?
+Provide a concise assessment with these sections:
 
-**Extrapolation (80 words):**
-5yr = X% predicted vs Y% benchmark (±Z% deviation). Is tail plausible for ${clinicalContext.indication || 'this indication'}?
+**Statistical Fit**
+Assess AIC competitiveness and visual tracking quality. Is fit good or poor?
 
-**Strengths (30 words):**
-- [Bullet 1]
-- [Bullet 2]
+**Extrapolation**
+Compare predicted survival to benchmarks. Is the tail plausible for ${clinicalContext.indication || 'this indication'}?
 
-**Weaknesses (30 words):**
-- [Bullet 1]
-- [Bullet 2]
+**Strengths**
+- Key strength 1
+- Key strength 2
 
-**Decision (10 words):**
-[Base Case / Scenario / Screen Out] - [one-line why]
+**Weaknesses**
+- Key weakness 1
+- Key weakness 2
+
+**Recommendation**
+State one of: Base Case, Scenario Analysis, or Screen Out, followed by a brief justification.
 
 DECISION CRITERIA:
-- **Base Case**: Top 2-3 AIC, fit ≥7, extrap ≥6, no red flags
-- **Scenario**: Fit ≥5, provides useful sensitivity, minor concerns
-- **Screen Out**: Fit <5, implausible extrap, or critical red flags
+- Base Case: Top 2-3 AIC, fit ≥7, extrap ≥6, no red flags
+- Scenario Analysis: Fit ≥5, useful for sensitivity, minor concerns
+- Screen Out: Fit <5, implausible extrapolation, or critical red flags
 
-Respond with ONLY the filled-in format above. No preamble.`;
+Output ONLY the filled sections above. Do not include word counts or instructional text.`;
 
   const messages = [new HumanMessage({ content: prompt })];
   const response = await llm.invoke(messages);
@@ -218,32 +220,47 @@ function parseReasoningResponse(content: string): ReasoningAssessmentResult['sec
 
   const statisticalFit = extractSection(content, '**Statistical Fit', ['**Extrapolation', '**Strengths']);
   const extrapolation = extractSection(content, '**Extrapolation', ['**Strengths', '**Weaknesses']);
-  const strengthsText = extractSection(content, '**Strengths', ['**Weaknesses', '**Decision']);
-  const weaknessesText = extractSection(content, '**Weaknesses', ['**Decision']);
-  const decisionText = extractSection(content, '**Decision', []);
+  const strengthsText = extractSection(content, '**Strengths', ['**Weaknesses', '**Decision', '**Recommendation']);
+  const weaknessesText = extractSection(content, '**Weaknesses', ['**Decision', '**Recommendation']);
+  
+  // Try both "Decision" and "Recommendation" headers
+  let decisionText = extractSection(content, '**Decision', []);
+  if (!decisionText) {
+    decisionText = extractSection(content, '**Recommendation', []);
+  }
 
   // Parse decision
   let decision: 'Base Case' | 'Scenario' | 'Screen Out' = 'Scenario';
-  if (decisionText.toLowerCase().includes('base case')) {
+  const lowerDecision = decisionText.toLowerCase();
+  if (lowerDecision.includes('base case')) {
     decision = 'Base Case';
-  } else if (decisionText.toLowerCase().includes('screen out')) {
+  } else if (lowerDecision.includes('screen out')) {
     decision = 'Screen Out';
+  } else if (lowerDecision.includes('scenario')) {
+    decision = 'Scenario';
   }
 
   // Extract justification (everything after the decision keyword)
-  const justificationMatch = decisionText.match(/(?:Base Case|Scenario|Screen Out)\s*[-–—:]\s*(.+)/i);
+  const justificationMatch = decisionText.match(/(?:Base Case|Scenario Analysis|Scenario|Screen Out)\s*[-–—:.,]\s*(.+)/is);
   const justification = justificationMatch ? justificationMatch[1].trim() : decisionText;
 
+  // Clean up any remaining word count markers or instructional text
+  const cleanText = (text: string) => text
+    .replace(/^\(\d+\s*words?\):?\s*/i, '')  // Remove "(50 words):" prefix
+    .replace(/^\*\*$/, '')  // Remove stray **
+    .replace(/\*\*$/g, '')  // Remove trailing **
+    .trim();
+
   return {
-    statistical_fit: statisticalFit.replace(/^\(.*?\):?\s*/, ''),
-    extrapolation: extrapolation.replace(/^\(.*?\):?\s*/, ''),
+    statistical_fit: cleanText(statisticalFit),
+    extrapolation: cleanText(extrapolation),
     strengths: extractBullets(strengthsText),
     weaknesses: extractBullets(weaknessesText),
     decision,
-    justification,
+    justification: cleanText(justification),
     // Legacy compatibility
-    recommendation: decisionText,
-    statistical_visual_fit: statisticalFit,
+    recommendation: cleanText(decisionText),
+    statistical_visual_fit: cleanText(statisticalFit),
     strengths_weaknesses: `Strengths: ${strengthsText}\n\nWeaknesses: ${weaknessesText}`,
   };
 }
