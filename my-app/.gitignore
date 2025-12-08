@@ -1,7 +1,12 @@
 # Dependencies
 node_modules
-data
 .pnpm-store/
+
+# Data directories (except rag_docs for RAG system)
+data/
+!data/rag_docs/
+!server/data/
+!server/data/rag_docs/
 
 # Build outputs
 dist
