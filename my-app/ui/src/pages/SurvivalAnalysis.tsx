@@ -575,13 +575,77 @@ class FinalDecisionErrorBoundary extends React.Component<
   }
 }
 
-// Helper to find best model for an arm based on AIC
+// Helper to find best model for an arm based on AIC (fallback)
 function findBestModelForArm(models: any[], arm: string): any | null {
   const armModels = models.filter(m => m.arm === arm && m.aic != null);
   if (armModels.length === 0) return null;
   return armModels.reduce((best, current) => 
     current.aic < best.aic ? current : best
   );
+}
+
+// Distribution names that might appear in synthesis text
+const DISTRIBUTION_NAMES = [
+  'generalized-gamma', 'generalized gamma', 'gen-gamma',
+  'weibull', 'exponential', 'log-normal', 'lognormal', 'log normal',
+  'log-logistic', 'loglogistic', 'log logistic', 'gompertz'
+];
+
+// Helper to parse synthesis text and find recommended model for an arm
+function findRecommendedModelFromSynthesis(
+  models: any[], 
+  arm: string, 
+  synthesisText: string | null
+): any | null {
+  if (!synthesisText) return findBestModelForArm(models, arm);
+  
+  const armModels = models.filter(m => m.arm === arm);
+  if (armModels.length === 0) return null;
+  
+  // Look for arm-specific section in synthesis text
+  const armLabel = arm === 'pembro' ? 'pembrolizumab' : 'chemotherapy';
+  const text = synthesisText.toLowerCase();
+  
+  // Try to find patterns like "Pembrolizumab: generalized-gamma" or "Pembrolizumab Arm Base Case: weibull"
+  const armSectionPatterns = [
+    new RegExp(`${armLabel}[^:]*(?:base case|recommendation)?[:\\s]+([\\w-]+)`, 'i'),
+    new RegExp(`${armLabel}[^.]*?(${DISTRIBUTION_NAMES.join('|')})`, 'i'),
+    new RegExp(`(?:base case|recommend)[^.]*${armLabel}[^.]*?(${DISTRIBUTION_NAMES.join('|')})`, 'i'),
+  ];
+  
+  for (const pattern of armSectionPatterns) {
+    const match = synthesisText.match(pattern);
+    if (match) {
+      const modelName = match[1]?.toLowerCase().trim();
+      // Find matching model
+      const matchingModel = armModels.find(m => {
+        const dist = (m.distribution || '').toLowerCase();
+        return dist.includes(modelName) || modelName.includes(dist) ||
+          dist.replace(/-/g, ' ') === modelName.replace(/-/g, ' ');
+      });
+      if (matchingModel) {
+        console.log(`[FinalDecision] Found recommended model for ${arm}:`, matchingModel.distribution);
+        return matchingModel;
+      }
+    }
+  }
+  
+  // Fallback: find any distribution mentioned in the text and match to arm's models
+  for (const distName of DISTRIBUTION_NAMES) {
+    if (text.includes(distName.toLowerCase())) {
+      const matchingModel = armModels.find(m => {
+        const dist = (m.distribution || '').toLowerCase().replace(/-/g, '');
+        return dist.includes(distName.replace(/-/g, '').replace(/ /g, ''));
+      });
+      if (matchingModel) {
+        return matchingModel;
+      }
+    }
+  }
+  
+  // Ultimate fallback: best AIC
+  console.log(`[FinalDecision] Could not parse recommendation for ${arm}, using best AIC`);
+  return findBestModelForArm(models, arm);
 }
 
 // Final Decision Tab Component
@@ -645,47 +709,53 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
     );
   }
 
-  // Find best models dynamically based on AIC (instead of hardcoding)
-  const bestPembroModel = findBestModelForArm(models, 'pembro');
-  const bestChemoModel = findBestModelForArm(models, 'chemo');
+  // Find recommended models from synthesis (parses the synthesis text)
+  const recommendedPembroModel = findRecommendedModelFromSynthesis(models, 'pembro', synthesis?.primary_recommendation);
+  const recommendedChemoModel = findRecommendedModelFromSynthesis(models, 'chemo', synthesis?.primary_recommendation);
 
-  // Generate recommendations based on actual best models
-  const recommendations = synthesis?.primary_recommendation && (bestPembroModel || bestChemoModel)
+  // Generate recommendations based on synthesis analysis
+  const recommendations = synthesis?.primary_recommendation && (recommendedPembroModel || recommendedChemoModel)
     ? [
-        bestPembroModel && {
+        recommendedPembroModel && {
           arm: 'Pembrolizumab',
-          recommended_model: bestPembroModel.distribution || bestPembroModel.approach,
-          recommended_approach: bestPembroModel.approach,
-          model_id: bestPembroModel.id,
+          recommended_model: recommendedPembroModel.distribution || recommendedPembroModel.approach,
+          recommended_approach: recommendedPembroModel.approach,
+          model_id: recommendedPembroModel.id,
           confidence: 0.85,
-          reasoning: synthesis.primary_recommendation?.substring(0, 200) || 
-            'Selected based on best statistical fit (lowest AIC)',
+          reasoning: synthesis.primary_recommendation?.substring(0, 300) || 
+            'Selected based on synthesis analysis',
           alternatives: models
-            .filter(m => m.arm === 'pembro' && m.id !== bestPembroModel.id)
+            .filter(m => m.arm === 'pembro' && m.id !== recommendedPembroModel.id)
+            .sort((a, b) => (a.aic || Infinity) - (b.aic || Infinity))
             .slice(0, 3)
             .map(m => ({
               model_id: m.id,
               model_name: m.distribution || m.approach,
               approach: m.approach,
-              score: m.aic ? (10 - Math.min(9, (m.aic - bestPembroModel.aic) / 50)) : 5,
+              score: m.aic && recommendedPembroModel.aic 
+                ? Math.max(1, 10 - Math.min(9, (m.aic - recommendedPembroModel.aic) / 50)) 
+                : 5,
             })),
         },
-        bestChemoModel && {
+        recommendedChemoModel && {
           arm: 'Chemotherapy',
-          recommended_model: bestChemoModel.distribution || bestChemoModel.approach,
-          recommended_approach: bestChemoModel.approach,
-          model_id: bestChemoModel.id,
+          recommended_model: recommendedChemoModel.distribution || recommendedChemoModel.approach,
+          recommended_approach: recommendedChemoModel.approach,
+          model_id: recommendedChemoModel.id,
           confidence: 0.78,
-          reasoning: synthesis.primary_recommendation?.substring(0, 200) || 
-            'Selected based on best statistical fit (lowest AIC)',
+          reasoning: synthesis.primary_recommendation?.substring(0, 300) || 
+            'Selected based on synthesis analysis',
           alternatives: models
-            .filter(m => m.arm === 'chemo' && m.id !== bestChemoModel.id)
+            .filter(m => m.arm === 'chemo' && m.id !== recommendedChemoModel.id)
+            .sort((a, b) => (a.aic || Infinity) - (b.aic || Infinity))
             .slice(0, 3)
             .map(m => ({
               model_id: m.id,
               model_name: m.distribution || m.approach,
               approach: m.approach,
-              score: m.aic ? (10 - Math.min(9, (m.aic - bestChemoModel.aic) / 50)) : 5,
+              score: m.aic && recommendedChemoModel.aic 
+                ? Math.max(1, 10 - Math.min(9, (m.aic - recommendedChemoModel.aic) / 50)) 
+                : 5,
             })),
         },
       ].filter(Boolean)
