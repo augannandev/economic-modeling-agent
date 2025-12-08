@@ -24,7 +24,7 @@ export function Markdown({ content, className }: MarkdownProps) {
 
   return (
     <ReactMarkdown
-      className={cn('markdown-content prose prose-slate dark:prose-invert max-w-none', className)}
+      className={cn('markdown-content prose prose-slate dark:prose-invert max-w-none break-words overflow-hidden', className)}
       remarkPlugins={[remarkGfm]}
       components={{
         // Headings with colored left border accent
@@ -81,19 +81,18 @@ export function Markdown({ content, className }: MarkdownProps) {
 
         // Lists with better spacing and styling
         ul: ({ children }) => (
-          <ul className="my-4 ml-1 space-y-2">
+          <ul className="my-3 ml-6 list-disc space-y-1.5 marker:text-primary/60">
             {children}
           </ul>
         ),
         ol: ({ children }) => (
-          <ol className="my-4 ml-1 list-decimal space-y-2 marker:text-primary/70 marker:font-semibold">
+          <ol className="my-3 ml-6 list-decimal space-y-1.5 marker:text-primary/70 marker:font-semibold">
             {children}
           </ol>
         ),
         li: ({ children }) => (
-          <li className="text-foreground/90 pl-2 flex gap-2 leading-relaxed">
-            <span className="text-primary/60 mt-2 flex-shrink-0">•</span>
-            <span className="flex-1">{children}</span>
+          <li className="text-foreground/90 leading-relaxed pl-1">
+            {children}
           </li>
         ),
 
