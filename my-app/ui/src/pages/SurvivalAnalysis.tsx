@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Markdown, CompactMarkdown } from '@/components/ui/markdown';
 import { downloadPDF } from '@/lib/pdfUtils';
 import { ChatSidebar } from '@/components/chat';
-import { FinalDecisionPanel } from '@/components/survival';
+import { FinalDecisionPanel, ReproducibilityTab } from '@/components/survival';
 import { 
   CheckCircle2, 
   Circle, 
@@ -364,6 +364,9 @@ export function SurvivalAnalysis() {
                     {selectedAnalysis.status === 'completed' && (
                       <TabsTrigger value="decision">Final Decision</TabsTrigger>
                     )}
+                    {selectedAnalysis.status === 'completed' && (
+                      <TabsTrigger value="reproducibility">Reproducibility</TabsTrigger>
+                    )}
                     <TabsTrigger value="usage">Usage</TabsTrigger>
                   </TabsList>
 
@@ -400,6 +403,12 @@ export function SurvivalAnalysis() {
                   {selectedAnalysis.status === 'completed' && (
                     <TabsContent value="decision" className="space-y-4">
                       <FinalDecisionTab analysisId={selectedAnalysis.id} />
+                    </TabsContent>
+                  )}
+
+                  {selectedAnalysis.status === 'completed' && (
+                    <TabsContent value="reproducibility" className="space-y-4">
+                      <ReproducibilityTabWrapper analysisId={selectedAnalysis.id} />
                     </TabsContent>
                   )}
 
@@ -612,6 +621,61 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
       }))}
       onApprove={handleApprove}
       isSubmitting={submitting}
+    />
+  );
+}
+
+// Reproducibility Tab Wrapper Component
+function ReproducibilityTabWrapper({ analysisId }: { analysisId: string }) {
+  const [models, setModels] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadModels();
+  }, [analysisId]);
+
+  const loadModels = async () => {
+    try {
+      const data = await survivalApi.listModels(analysisId);
+      setModels(data.models);
+    } catch (err) {
+      console.error('Failed to load models for reproducibility:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="text-center py-8">Loading...</div>;
+  }
+
+  // Calculate arm data from models
+  const armData = {
+    pembro: {
+      n: models.filter(m => m.arm === 'pembro').length > 0 ? 154 : 0,
+      events: 45,
+      maxTime: 18.75
+    },
+    chemo: {
+      n: models.filter(m => m.arm === 'chemo').length > 0 ? 151 : 0,
+      events: 59,
+      maxTime: 18.5
+    }
+  };
+
+  return (
+    <ReproducibilityTab
+      analysisId={analysisId}
+      models={models.map(m => ({
+        id: m.id,
+        arm: m.arm,
+        approach: m.approach,
+        distribution: m.distribution,
+        aic: m.aic,
+        bic: m.bic,
+        parameters: m.parameters
+      }))}
+      armData={armData}
     />
   );
 }

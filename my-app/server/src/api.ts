@@ -388,6 +388,132 @@ survivalRoutes.get('/analyses/:id/synthesis', async (c) => {
   }
 });
 
+// Get reproducibility code package
+survivalRoutes.get('/analyses/:id/code-package', async (c) => {
+  try {
+    const user = c.get('user');
+    const analysisId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    // Verify analysis belongs to user
+    const [analysis] = await db.select()
+      .from(analyses)
+      .where(eq(analyses.id, analysisId));
+
+    if (!analysis || analysis.user_id !== user.id) {
+      return c.json({ error: 'Analysis not found' }, 404);
+    }
+
+    // Get all models for this analysis
+    const modelList = await db.select()
+      .from(models)
+      .where(eq(models.analysis_id, analysisId));
+
+    // Generate R code
+    const distributions = [...new Set(modelList.map(m => m.distribution))];
+    const timestamp = new Date().toISOString();
+
+    const rCode = `# ===================================
+# Survival Analysis Reproducibility Code
+# Analysis ID: ${analysisId}
+# Generated: ${timestamp}
+# ===================================
+
+# Required packages
+# install.packages(c("IPDfromKM", "flexsurv", "survival", "ggplot2"))
+
+library(IPDfromKM)
+library(flexsurv)
+library(survival)
+library(ggplot2)
+
+# ===================
+# 1. IPD RECONSTRUCTION
+# ===================
+
+# Load digitized KM data
+# pembro_km <- read.csv("pembrolizumab_km_digitized.csv")
+# chemo_km <- read.csv("chemotherapy_km_digitized.csv")
+
+# Risk tables (update with actual values from publication)
+pembro_risk <- data.frame(
+  time = c(0, 3, 6, 9, 12, 15, 18),
+  nrisk = c(154, 140, 128, 115, 98, 72, 45)
+)
+
+chemo_risk <- data.frame(
+  time = c(0, 3, 6, 9, 12, 15, 18),
+  nrisk = c(151, 125, 98, 75, 55, 38, 22)
+)
+
+# Reconstruct IPD
+# pembro_ipd <- getIPD(surv_inp = pembro_km, nrisk_inp = pembro_risk, tot_events = 45)
+# chemo_ipd <- getIPD(surv_inp = chemo_km, nrisk_inp = chemo_risk, tot_events = 59)
+
+# ===================
+# 2. MODEL FITTING
+# ===================
+
+# Load your IPD data
+# ipd <- read.csv("reconstructed_ipd.csv")
+# pembro_data <- subset(ipd, arm == "Pembrolizumab")
+# chemo_data <- subset(ipd, arm == "Chemotherapy")
+
+# Distributions fitted in this analysis
+distributions <- c(${distributions.map(d => `"${d}"`).join(', ')})
+
+# Fit all distributions
+fit_all <- function(data, arm_name) {
+  results <- data.frame()
+  for (dist in distributions) {
+    tryCatch({
+      fit <- flexsurvreg(Surv(time, event) ~ 1, data = data, dist = dist)
+      results <- rbind(results, data.frame(
+        Distribution = dist,
+        AIC = AIC(fit),
+        BIC = BIC(fit)
+      ))
+    }, error = function(e) {
+      message(paste("Could not fit", dist))
+    })
+  }
+  return(results[order(results$AIC), ])
+}
+
+# Run fitting
+# pembro_results <- fit_all(pembro_data, "Pembrolizumab")
+# chemo_results <- fit_all(chemo_data, "Chemotherapy")
+
+# ===================
+# 3. EXTRAPOLATION
+# ===================
+
+# Get survival predictions at key timepoints
+timepoints <- c(12, 24, 60, 120)  # 1yr, 2yr, 5yr, 10yr
+
+# Example with best model:
+# best_fit <- flexsurvreg(Surv(time, event) ~ 1, data = pembro_data, dist = "exp")
+# summary(best_fit, t = timepoints, type = "survival")
+
+# ===================
+# Citation
+# ===================
+# Guyot P, et al. BMC Med Res Methodol. 2012;12:9.
+# Jackson C. flexsurv: A Platform for Parametric Survival Modelling in R. JSS 2016;70(8).
+`;
+
+    // Return as downloadable file
+    c.header('Content-Type', 'text/plain');
+    c.header('Content-Disposition', `attachment; filename="survival_code_${analysisId}.R"`);
+    return c.body(rCode);
+  } catch (error) {
+    return c.json({
+      error: 'Failed to generate code package',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
 // Get plot image
 survivalRoutes.get('/analyses/:id/plots/:modelId/:plotType', async (c) => {
   try {
