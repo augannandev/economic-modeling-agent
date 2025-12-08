@@ -5,7 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Markdown, CompactMarkdown } from '@/components/ui/markdown';
-import { downloadPDF } from '@/lib/pdfUtils';
+import { downloadPDF, downloadMarkdownAsPDF } from '@/lib/pdfUtils';
+import { downloadSynthesisAsDocx } from '@/lib/docxUtils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { ChatSidebar } from '@/components/chat';
 import { FinalDecisionPanel, ReproducibilityTab, IPDPreview } from '@/components/survival';
 import { 
@@ -16,7 +23,10 @@ import {
   PauseCircle,
   MessageSquare,
   AlertCircle,
-  ChevronRight
+  ChevronRight,
+  Download,
+  FileText,
+  FileType
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -393,14 +403,7 @@ export function SurvivalAnalysis() {
                   </TabsContent>
 
                   <TabsContent value="synthesis" className="space-y-4">
-                    <div className="flex justify-end mb-2">
-                      <Button variant="outline" size="sm" onClick={() => downloadPDF('synthesis-content', 'synthesis-report')}>
-                        Download Report
-                      </Button>
-                    </div>
-                    <div id="synthesis-content">
-                      <SynthesisTab analysisId={selectedAnalysis.id} />
-                    </div>
+                    <SynthesisTab analysisId={selectedAnalysis.id} />
                   </TabsContent>
 
                   {selectedAnalysis.status === 'completed' && (
@@ -1285,6 +1288,7 @@ function ModelDetailView({
 function SynthesisTab({ analysisId }: { analysisId: string }) {
   const [synthesis, setSynthesis] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     loadSynthesis();
@@ -1301,29 +1305,109 @@ function SynthesisTab({ analysisId }: { analysisId: string }) {
     }
   };
 
+  const handleDownloadPDF = async () => {
+    if (!synthesis) return;
+    setExporting(true);
+    try {
+      const sections = [
+        { title: 'Primary Recommendation', content: synthesis.primary_recommendation || '' },
+        { title: 'Key Uncertainties', content: synthesis.key_uncertainties || '' },
+        { title: 'Full Analysis Report', content: synthesis.full_text || '' },
+      ];
+      await downloadMarkdownAsPDF('Survival Analysis Synthesis Report', sections, 'synthesis-report');
+    } catch (err) {
+      console.error('Failed to export PDF:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDownloadDocx = async () => {
+    if (!synthesis) return;
+    setExporting(true);
+    try {
+      const sections = [
+        { title: 'Primary Recommendation', content: synthesis.primary_recommendation || '' },
+        { title: 'Key Uncertainties', content: synthesis.key_uncertainties || '' },
+        { title: 'Full Analysis Report', content: synthesis.full_text || '' },
+      ];
+      await downloadSynthesisAsDocx('Survival Analysis Synthesis Report', sections, 'synthesis-report');
+    } catch (err) {
+      console.error('Failed to export DOCX:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading) return <div>Loading synthesis...</div>;
   if (!synthesis) return <div className="text-muted-foreground">No synthesis report available yet.</div>;
 
   return (
     <div className="space-y-4">
+      {/* Download Options */}
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" disabled={exporting}>
+              {exporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Report
+                </>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleDownloadPDF}>
+              <FileText className="h-4 w-4 mr-2" />
+              Download as PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleDownloadDocx}>
+              <FileType className="h-4 w-4 mr-2" />
+              Download as Word (.docx)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
       <Card>
-        <CardHeader><CardTitle>Primary Recommendation</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <span className="w-1 h-5 bg-primary rounded-full" />
+            Primary Recommendation
+          </CardTitle>
+        </CardHeader>
         <CardContent>
           <CompactMarkdown content={synthesis.primary_recommendation || 'Not available'} />
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Key Uncertainties</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <span className="w-1 h-5 bg-amber-500 rounded-full" />
+            Key Uncertainties
+          </CardTitle>
+        </CardHeader>
         <CardContent>
           <CompactMarkdown content={synthesis.key_uncertainties || 'Not available'} />
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Full Report</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <span className="w-1 h-5 bg-blue-500 rounded-full" />
+            Full Report
+          </CardTitle>
+        </CardHeader>
         <CardContent>
-          <div className="max-h-[600px] overflow-y-auto pr-2">
+          <div className="max-h-[600px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
             <Markdown content={synthesis.full_text || ''} />
           </div>
         </CardContent>
