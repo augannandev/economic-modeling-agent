@@ -526,11 +526,70 @@ function OverviewTab({ analysis }: { analysis: Analysis }) {
   );
 }
 
+// Error Boundary for FinalDecisionPanel
+class FinalDecisionErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('FinalDecisionPanel error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-destructive mb-4">
+              <AlertCircle className="h-5 w-5" />
+              <span className="font-semibold">Failed to load Final Decision panel</span>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              There was an error rendering the model selection interface.
+            </p>
+            <p className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded">
+              {this.state.error?.message || 'Unknown error'}
+            </p>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="mt-4"
+              onClick={() => this.setState({ hasError: false, error: null })}
+            >
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Helper to find best model for an arm based on AIC
+function findBestModelForArm(models: any[], arm: string): any | null {
+  const armModels = models.filter(m => m.arm === arm && m.aic != null);
+  if (armModels.length === 0) return null;
+  return armModels.reduce((best, current) => 
+    current.aic < best.aic ? current : best
+  );
+}
+
 // Final Decision Tab Component
 function FinalDecisionTab({ analysisId }: { analysisId: string }) {
   const [models, setModels] = useState<any[]>([]);
   const [synthesis, setSynthesis] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -539,14 +598,16 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
 
   const loadData = async () => {
     try {
+      setError(null);
       const [modelsData, synthesisData] = await Promise.all([
         survivalApi.listModels(analysisId),
         survivalApi.getSynthesis(analysisId),
       ]);
-      setModels(modelsData.models);
+      setModels(modelsData.models || []);
       setSynthesis(synthesisData.synthesis);
     } catch (err) {
       console.error('Failed to load data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -567,38 +628,67 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
 
   if (loading) return <div className="text-center py-8">Loading...</div>;
 
-  // Generate mock recommendations from synthesis
-  const recommendations = synthesis?.primary_recommendation
+  if (error) {
+    return (
+      <Card className="border-destructive">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2 text-destructive mb-2">
+            <AlertCircle className="h-5 w-5" />
+            <span className="font-semibold">Failed to load recommendations</span>
+          </div>
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => { setLoading(true); loadData(); }}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Find best models dynamically based on AIC (instead of hardcoding)
+  const bestPembroModel = findBestModelForArm(models, 'pembro');
+  const bestChemoModel = findBestModelForArm(models, 'chemo');
+
+  // Generate recommendations based on actual best models
+  const recommendations = synthesis?.primary_recommendation && (bestPembroModel || bestChemoModel)
     ? [
-        {
+        bestPembroModel && {
           arm: 'Pembrolizumab',
-          recommended_model: 'Weibull',
-          recommended_approach: 'one-piece',
-          model_id: models.find(m => m.arm === 'pembro' && m.distribution === 'weibull')?.id || '',
+          recommended_model: bestPembroModel.distribution || bestPembroModel.approach,
+          recommended_approach: bestPembroModel.approach,
+          model_id: bestPembroModel.id,
           confidence: 0.85,
-          reasoning: 'Optimal balance of statistical fit and clinically plausible extrapolation',
-          alternatives: models.filter(m => m.arm === 'pembro').slice(0, 3).map(m => ({
-            model_id: m.id,
-            model_name: m.distribution,
-            approach: m.approach,
-            score: Math.random() * 3 + 7,
-          })),
+          reasoning: synthesis.primary_recommendation?.substring(0, 200) || 
+            'Selected based on best statistical fit (lowest AIC)',
+          alternatives: models
+            .filter(m => m.arm === 'pembro' && m.id !== bestPembroModel.id)
+            .slice(0, 3)
+            .map(m => ({
+              model_id: m.id,
+              model_name: m.distribution || m.approach,
+              approach: m.approach,
+              score: m.aic ? (10 - Math.min(9, (m.aic - bestPembroModel.aic) / 50)) : 5,
+            })),
         },
-        {
+        bestChemoModel && {
           arm: 'Chemotherapy',
-          recommended_model: 'Log-normal',
-          recommended_approach: 'one-piece',
-          model_id: models.find(m => m.arm === 'chemo' && m.distribution === 'lognormal')?.id || '',
+          recommended_model: bestChemoModel.distribution || bestChemoModel.approach,
+          recommended_approach: bestChemoModel.approach,
+          model_id: bestChemoModel.id,
           confidence: 0.78,
-          reasoning: 'Best fit based on AIC/BIC and clinical plausibility',
-          alternatives: models.filter(m => m.arm === 'chemo').slice(0, 3).map(m => ({
-            model_id: m.id,
-            model_name: m.distribution,
-            approach: m.approach,
-            score: Math.random() * 3 + 7,
-          })),
+          reasoning: synthesis.primary_recommendation?.substring(0, 200) || 
+            'Selected based on best statistical fit (lowest AIC)',
+          alternatives: models
+            .filter(m => m.arm === 'chemo' && m.id !== bestChemoModel.id)
+            .slice(0, 3)
+            .map(m => ({
+              model_id: m.id,
+              model_name: m.distribution || m.approach,
+              approach: m.approach,
+              score: m.aic ? (10 - Math.min(9, (m.aic - bestChemoModel.aic) / 50)) : 5,
+            })),
         },
-      ]
+      ].filter(Boolean)
     : [];
 
   if (recommendations.length === 0) {
@@ -610,21 +700,23 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
   }
 
   return (
-    <FinalDecisionPanel
-      analysisId={analysisId}
-      recommendations={recommendations}
-      allModels={models.map(m => ({
-        id: m.id,
-        arm: m.arm === 'pembro' ? 'Pembrolizumab' : 
-             m.arm === 'chemo' ? 'Chemotherapy' : m.arm,
-        approach: m.approach,
-        distribution: m.distribution,
-        aic: m.aic,
-        bic: m.bic,
-      }))}
-      onApprove={handleApprove}
-      isSubmitting={submitting}
-    />
+    <FinalDecisionErrorBoundary>
+      <FinalDecisionPanel
+        analysisId={analysisId}
+        recommendations={recommendations}
+        allModels={models.map(m => ({
+          id: m.id,
+          arm: m.arm === 'pembro' ? 'Pembrolizumab' : 
+               m.arm === 'chemo' ? 'Chemotherapy' : m.arm,
+          approach: m.approach,
+          distribution: m.distribution,
+          aic: m.aic,
+          bic: m.bic,
+        }))}
+        onApprove={handleApprove}
+        isSubmitting={submitting}
+      />
+    </FinalDecisionErrorBoundary>
   );
 }
 

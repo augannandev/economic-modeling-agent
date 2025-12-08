@@ -190,11 +190,19 @@ function buildModelSummaryTable(models: ModelAssessment[], arm: string): string 
 }
 
 /**
+ * Normalize approach name for case-insensitive comparison
+ */
+function normalizeApproach(approach: string): string {
+  return approach.toLowerCase().replace(/[-_\s]/g, '');
+}
+
+/**
  * Build comparison table for a specific approach
  */
 function buildApproachComparisonTable(models: ModelAssessment[], approach: string): string {
+  const normalizedApproach = normalizeApproach(approach);
   const approachModels = models
-    .filter(m => m.approach === approach)
+    .filter(m => normalizeApproach(m.approach) === normalizedApproach)
     .sort((a, b) => a.aic - b.aic);
   
   if (approachModels.length === 0) return `*No ${approach} models available*`;
@@ -289,11 +297,11 @@ export async function synthesizeCrossModel(
   const scenarioModels = allModelAssessments.filter(m => m.recommendation === 'Scenario');
   const screenedOutModels = allModelAssessments.filter(m => m.recommendation === 'Screen Out');
 
-  // Group by approach
+  // Group by approach (case-insensitive)
   const byApproach = {
-    'One-piece': allModelAssessments.filter(m => m.approach === 'One-piece'),
-    'Piecewise': allModelAssessments.filter(m => m.approach === 'Piecewise'),
-    'Spline': allModelAssessments.filter(m => m.approach === 'Spline')
+    'One-piece': allModelAssessments.filter(m => normalizeApproach(m.approach) === 'onepiece'),
+    'Piecewise': allModelAssessments.filter(m => normalizeApproach(m.approach) === 'piecewise'),
+    'Spline': allModelAssessments.filter(m => normalizeApproach(m.approach) === 'spline')
   };
 
   // Build comprehensive prompt

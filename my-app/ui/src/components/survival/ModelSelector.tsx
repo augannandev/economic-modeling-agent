@@ -48,11 +48,17 @@ export function ModelSelector({
   // Get unique approaches
   const approaches = Array.from(new Set(models.map((m) => m.approach)));
 
+  // Helper to get display name for model (distribution or scale for splines)
+  const getModelDisplayName = (model: Model): string => {
+    return model.distribution || `${model.approach}` || 'Unknown';
+  };
+
   // Filter and sort models
   const filteredModels = models
     .filter((model) => {
+      const displayName = getModelDisplayName(model);
       const matchesSearch = 
-        model.distribution.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         model.approach.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesApproach = 
         filterApproach === 'all' || model.approach === filterApproach;
@@ -64,8 +70,8 @@ export function ModelSelector({
 
       switch (sortField) {
         case 'distribution':
-          aVal = a.distribution;
-          bVal = b.distribution;
+          aVal = getModelDisplayName(a);
+          bVal = getModelDisplayName(b);
           break;
         case 'approach':
           aVal = a.approach;
@@ -185,7 +191,7 @@ export function ModelSelector({
               <div className="col-span-4 flex items-center gap-2">
                 {isSelected && <CheckCircle2 className="h-4 w-4 text-primary" />}
                 {isRecommended && !isSelected && <Star className="h-4 w-4 text-amber-500" />}
-                <span className="font-medium">{model.distribution}</span>
+                <span className="font-medium">{getModelDisplayName(model)}</span>
               </div>
               
               <div className="col-span-2">
