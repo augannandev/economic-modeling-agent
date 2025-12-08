@@ -1301,27 +1301,46 @@ api.get('/rag/status', async (c) => {
 api.post('/rag/ingest', async (c) => {
   try {
     const ragService = getRAGService();
+    const fs = await import('fs/promises');
     
     // Determine rag_data path - check multiple locations
     let ragDir = process.env.RAG_DATA_DIR;
+    const checkedPaths: string[] = [];
+    
+    if (ragDir) {
+      // Validate the env-provided path exists
+      try {
+        await fs.access(ragDir);
+      } catch {
+        console.log(`[RAG] RAG_DATA_DIR path not found: ${ragDir}`);
+        checkedPaths.push(`${ragDir} (from RAG_DATA_DIR - NOT FOUND)`);
+        ragDir = undefined;
+      }
+    }
+    
     if (!ragDir) {
       // Try relative paths from server directory
       const possiblePaths = [
-        path.join(process.cwd(), 'data', 'rag_docs'),  // Production: /app/data/rag_docs
+        '/app/data/rag_docs',  // Railway Docker: /app is WORKDIR
+        path.join(process.cwd(), 'data', 'rag_docs'),
         path.join(process.cwd(), 'rag_data'),
-        path.join(process.cwd(), '..', 'rag_data'),
-        path.join(__dirname, '..', '..', 'data', 'rag_docs'),
-        path.join(__dirname, '..', '..', 'rag_data'),
+        path.join(__dirname, '..', 'data', 'rag_docs'),
+        path.join(__dirname, 'data', 'rag_docs'),
       ];
       
       for (const p of possiblePaths) {
         try {
-          const fs = await import('fs/promises');
           await fs.access(p);
-          ragDir = p;
-          break;
+          const files = await fs.readdir(p);
+          if (files.length > 0) {
+            ragDir = p;
+            checkedPaths.push(`${p} (FOUND - ${files.length} files)`);
+            break;
+          } else {
+            checkedPaths.push(`${p} (exists but empty)`);
+          }
         } catch {
-          // Path doesn't exist, try next
+          checkedPaths.push(`${p} (not found)`);
         }
       }
     }
@@ -1329,7 +1348,10 @@ api.post('/rag/ingest', async (c) => {
     if (!ragDir) {
       return c.json({
         success: false,
-        error: 'RAG data directory not found. Set RAG_DATA_DIR environment variable.',
+        error: 'RAG data directory not found',
+        checkedPaths,
+        cwd: process.cwd(),
+        dirname: __dirname,
       }, 400);
     }
     
@@ -1341,6 +1363,7 @@ api.post('/rag/ingest', async (c) => {
       ragDir,
       documentsProcessed: result.documentsProcessed,
       chunksCreated: result.chunksCreated,
+      checkedPaths,
     });
   } catch (error) {
     console.error('[RAG] Ingestion error:', error);
