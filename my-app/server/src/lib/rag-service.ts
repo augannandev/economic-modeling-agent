@@ -53,8 +53,12 @@ export class RAGService {
   private initialized = false;
 
   constructor() {
+    // Support both 'path' (for http URLs) and direct connection
+    const chromaUrl = process.env.CHROMA_URL || 'http://localhost:8000';
+    console.log(`[RAG] Connecting to ChromaDB at: ${chromaUrl}`);
+    
     this.client = new ChromaClient({
-      path: process.env.CHROMA_URL || 'http://localhost:8000'
+      path: chromaUrl
     });
     
     this.openai = new OpenAI({

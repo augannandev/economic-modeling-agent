@@ -1270,6 +1270,108 @@ digitizerRoutes.post('/generate-ipd', async (c) => {
 // Mount digitizer routes
 api.route('/digitizer', digitizerRoutes);
 
+// ============================================================================
+// RAG Management Routes
+// ============================================================================
+import { getRAGService } from './lib/rag-service';
+import path from 'path';
+
+// RAG status endpoint
+api.get('/rag/status', async (c) => {
+  try {
+    const ragService = getRAGService();
+    const stats = await ragService.getStats();
+    return c.json({
+      status: 'ok',
+      chromaUrl: process.env.CHROMA_URL || 'http://localhost:8000',
+      collection: 'survival_analysis_docs',
+      documentCount: stats.count,
+      sources: stats.sources,
+    });
+  } catch (error) {
+    return c.json({
+      status: 'error',
+      error: error instanceof Error ? error.message : 'ChromaDB connection failed',
+      chromaUrl: process.env.CHROMA_URL || 'http://localhost:8000',
+    }, 500);
+  }
+});
+
+// RAG ingestion endpoint (POST to trigger ingestion)
+api.post('/rag/ingest', async (c) => {
+  try {
+    const ragService = getRAGService();
+    
+    // Determine rag_data path - check multiple locations
+    let ragDir = process.env.RAG_DATA_DIR;
+    if (!ragDir) {
+      // Try relative paths from server directory
+      const possiblePaths = [
+        path.join(process.cwd(), 'rag_data'),
+        path.join(process.cwd(), '..', 'rag_data'),
+        path.join(__dirname, '..', '..', 'rag_data'),
+      ];
+      
+      for (const p of possiblePaths) {
+        try {
+          const fs = await import('fs/promises');
+          await fs.access(p);
+          ragDir = p;
+          break;
+        } catch {
+          // Path doesn't exist, try next
+        }
+      }
+    }
+    
+    if (!ragDir) {
+      return c.json({
+        success: false,
+        error: 'RAG data directory not found. Set RAG_DATA_DIR environment variable.',
+      }, 400);
+    }
+    
+    console.log(`[RAG] Ingesting documents from: ${ragDir}`);
+    const result = await ragService.ingestDocuments(ragDir);
+    
+    return c.json({
+      success: result.success,
+      ragDir,
+      documentsProcessed: result.documentsProcessed,
+      chunksCreated: result.chunksCreated,
+    });
+  } catch (error) {
+    console.error('[RAG] Ingestion error:', error);
+    return c.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Ingestion failed',
+    }, 500);
+  }
+});
+
+// RAG query test endpoint
+api.post('/rag/query', async (c) => {
+  try {
+    const { query, nResults = 3 } = await c.req.json();
+    
+    if (!query) {
+      return c.json({ error: 'Query is required' }, 400);
+    }
+    
+    const ragService = getRAGService();
+    const results = await ragService.query(query, nResults);
+    
+    return c.json({
+      query,
+      results,
+    });
+  } catch (error) {
+    return c.json({
+      error: error instanceof Error ? error.message : 'Query failed',
+    }, 500);
+  }
+});
+
 // Mount the API router
 app.route('/api/v1', api);
 
