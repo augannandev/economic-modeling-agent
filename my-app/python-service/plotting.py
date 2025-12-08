@@ -660,7 +660,7 @@ def _generate_short_term_plot(
     
     ax.set_xlabel('Time (months)', fontsize=12)
     ax.set_ylabel('Survival Probability', fontsize=12)
-    ax.set_title(f'Short-term Fit (0-{int(max_time)} months)\n{model_id}', fontsize=14)
+    ax.set_title(f'Short-term Fit (0-{int(max_time)} months)', fontsize=14)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3)
     ax.set_xlim(0, max_time)
@@ -744,7 +744,7 @@ def _generate_long_term_plot(
     
     ax.set_xlabel('Time (months)', fontsize=12)
     ax.set_ylabel('Survival Probability', fontsize=12)
-    ax.set_title(f'Long-term Extrapolation (0-240 months / 20 years)\n{model_id}', fontsize=14)
+    ax.set_title('Long-term Extrapolation (0-240 months / 20 years)', fontsize=14)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3)
     ax.set_xlim(0, 240)
