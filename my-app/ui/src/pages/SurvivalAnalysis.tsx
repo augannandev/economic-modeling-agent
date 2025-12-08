@@ -159,25 +159,25 @@ export function SurvivalAnalysis() {
   const currentStepIndex = getStepIndex(selectedAnalysis?.workflow_state || null);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem)] w-full max-w-[100vw] overflow-hidden box-border">
       {/* Main Content */}
       <div className={cn(
-        "flex-1 min-w-0 overflow-y-auto overflow-x-hidden transition-all duration-300",
+        "flex-1 min-w-0 w-full overflow-y-auto overflow-x-hidden transition-all duration-300",
         isChatOpen ? "mr-96" : ""
       )}>
-        <div className="w-full max-w-7xl mx-auto p-6 space-y-6">
+        <div className="w-full px-4 md:px-6 py-6 space-y-6 box-border">
           {/* Header */}
-          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">Survival Analysis</h1>
-              <p className="text-muted-foreground mt-1">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
+            <div className="min-w-0 flex-shrink">
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Survival Analysis</h1>
+              <p className="text-muted-foreground mt-1 text-sm md:text-base">
                 Comprehensive analysis with 42+ parametric models
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 md:gap-3 flex-shrink-0">
               {/* Endpoint Toggle */}
-              <div className="flex items-center bg-muted/50 p-1 rounded-lg border flex-shrink-0">
+              <div className="flex items-center bg-muted/50 p-1 rounded-lg border">
                 <button
                   className={cn(
                     "px-3 py-1.5 text-sm font-medium rounded-md transition-all",
@@ -222,14 +222,17 @@ export function SurvivalAnalysis() {
                 <MessageSquare className="h-4 w-4" />
               </Button>
 
-              <Button onClick={handleStartAnalysis} disabled={loading}>
+              <Button onClick={handleStartAnalysis} disabled={loading} className="whitespace-nowrap">
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     Starting...
                   </>
                 ) : (
-                  `New ${endpointType} Analysis`
+                  <>
+                    <span className="hidden sm:inline">New {endpointType} Analysis</span>
+                    <span className="sm:hidden">New</span>
+                  </>
                 )}
               </Button>
             </div>
