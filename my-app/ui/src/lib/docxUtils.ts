@@ -13,6 +13,7 @@ import {
   Header,
   Footer,
   PageNumber,
+  LevelFormat,
 } from 'docx';
 import { saveAs } from 'file-saver';
 
@@ -72,6 +73,26 @@ export async function downloadSynthesisAsDocx(
   }
 
   const doc = new Document({
+    numbering: {
+      config: [
+        {
+          reference: 'default-numbering',
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.DECIMAL,
+              text: '%1.',
+              alignment: AlignmentType.START,
+              style: {
+                paragraph: {
+                  indent: { left: 720, hanging: 360 },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
     sections: [
       {
         properties: {
