@@ -42,7 +42,6 @@ export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewPr
   const [activeEndpoint, setActiveEndpoint] = useState<'OS' | 'PFS'>('OS');
   const [previewData, setPreviewData] = useState<Record<string, IPDPreviewData>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({ OS: true, PFS: true });
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadPreview('OS');
@@ -85,7 +84,6 @@ export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewPr
   };
 
   const currentData = previewData[activeEndpoint];
-  const isLoading = loading[activeEndpoint];
 
   return (
     <Card className="w-full">
