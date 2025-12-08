@@ -86,6 +86,7 @@ export function FinalDecisionPanel({
     recommendations[0]?.arm || null
   );
   const [showAlternatives, setShowAlternatives] = useState<Record<string, boolean>>({});
+  const [justApproved, setJustApproved] = useState<Record<string, boolean>>({});
 
   const handleApprove = (arm: string) => {
     const rec = recommendations.find((r) => r.arm === arm);
@@ -101,6 +102,12 @@ export function FinalDecisionPanel({
         selected_approach: rec.recommended_approach,
       },
     }));
+    
+    // Show visual feedback
+    setJustApproved((prev) => ({ ...prev, [arm]: true }));
+    setTimeout(() => {
+      setJustApproved((prev) => ({ ...prev, [arm]: false }));
+    }, 2000);
   };
 
   const handleOverride = (arm: string, model: Model) => {
@@ -211,10 +218,23 @@ export function FinalDecisionPanel({
                     variant={decisions[rec.arm]?.approved ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => handleApprove(rec.arm)}
-                    className="gap-1"
+                    className={cn(
+                      "gap-1 transition-all",
+                      decisions[rec.arm]?.approved && "bg-green-600 hover:bg-green-700",
+                      justApproved[rec.arm] && "ring-2 ring-green-400 ring-offset-2"
+                    )}
                   >
-                    <ThumbsUp className="h-4 w-4" />
-                    Approve
+                    {decisions[rec.arm]?.approved ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4" />
+                        {justApproved[rec.arm] ? 'Approved!' : 'Approved'}
+                      </>
+                    ) : (
+                      <>
+                        <ThumbsUp className="h-4 w-4" />
+                        Approve
+                      </>
+                    )}
                   </Button>
                   <Button
                     variant={!decisions[rec.arm]?.approved ? 'default' : 'outline'}

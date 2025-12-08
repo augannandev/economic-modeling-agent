@@ -564,7 +564,7 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
           recommended_approach: 'one-piece',
           model_id: models.find(m => m.arm === 'pembro' && m.distribution === 'weibull')?.id || '',
           confidence: 0.85,
-          reasoning: synthesis.primary_recommendation || 'Based on comprehensive analysis',
+          reasoning: 'Optimal balance of statistical fit and clinically plausible extrapolation',
           alternatives: models.filter(m => m.arm === 'pembro').slice(0, 3).map(m => ({
             model_id: m.id,
             model_name: m.distribution,
@@ -603,7 +603,8 @@ function FinalDecisionTab({ analysisId }: { analysisId: string }) {
       recommendations={recommendations}
       allModels={models.map(m => ({
         id: m.id,
-        arm: m.arm,
+        arm: m.arm === 'pembro' ? 'Pembrolizumab' : 
+             m.arm === 'chemo' ? 'Chemotherapy' : m.arm,
         approach: m.approach,
         distribution: m.distribution,
         aic: m.aic,
