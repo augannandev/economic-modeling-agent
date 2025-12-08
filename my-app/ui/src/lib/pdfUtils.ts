@@ -77,7 +77,6 @@ export async function downloadPDF(elementId: string, filename: string): Promise<
         const contentHeight = pageHeight - (margin * 2);
 
         // Calculate scaled dimensions
-        const imgAspectRatio = img.width / img.height;
         const scaledWidth = contentWidth;
         const scaledHeight = (img.height * scaledWidth) / img.width;
 
