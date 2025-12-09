@@ -256,19 +256,23 @@ export function DataEditor({
                       {curvePoints.length > 0 && (() => {
                         const sortedCurvePoints = [...curvePoints].sort((a, b) => a.time - b.time);
                         const pathParts: string[] = [];
+                        // Normalize survival values: if yMax > 1, data is in percentage (0-100), else in proportion (0-1)
+                        const yMax = axisRanges.yMax || 1;
                         
                         for (let i = 0; i < sortedCurvePoints.length; i++) {
                           const x = 50 + (sortedCurvePoints[i].time / axisRanges.xMax) * 340;
-                          const y = 240 - sortedCurvePoints[i].survival * 220;
+                          const normalizedSurvival = sortedCurvePoints[i].survival / yMax;
+                          const y = 240 - normalizedSurvival * 220;
                           
                           if (i === 0) {
                             // Start at first point
                             pathParts.push(`M ${x} ${y}`);
                           } else {
-                            const prevY = 240 - sortedCurvePoints[i-1].survival * 220;
+                            const prevNormalizedSurvival = sortedCurvePoints[i-1].survival / yMax;
+                            const prevY = 240 - prevNormalizedSurvival * 220;
                             // Horizontal line to new time at previous survival, then vertical drop
                             pathParts.push(`L ${x} ${prevY}`);
-                            if (Math.abs(sortedCurvePoints[i].survival - sortedCurvePoints[i-1].survival) > 0.001) {
+                            if (Math.abs(sortedCurvePoints[i].survival - sortedCurvePoints[i-1].survival) > 0.001 * yMax) {
                               pathParts.push(`L ${x} ${y}`);
                             }
                           }
@@ -276,7 +280,8 @@ export function DataEditor({
                         
                         // Extend the line to the end of the plot
                         if (sortedCurvePoints.length > 0) {
-                          const lastY = 240 - sortedCurvePoints[sortedCurvePoints.length - 1].survival * 220;
+                          const lastNormalizedSurvival = sortedCurvePoints[sortedCurvePoints.length - 1].survival / yMax;
+                          const lastY = 240 - lastNormalizedSurvival * 220;
                           pathParts.push(`L 390 ${lastY}`);
                         }
                         
@@ -295,9 +300,12 @@ export function DataEditor({
                       {/* Data point markers - shown at GRANULARITY intervals (resampled points) */}
                       {points.length > 0 && (() => {
                         const sortedPoints = [...points].sort((a, b) => a.time - b.time);
+                        // Normalize survival values: if yMax > 1, data is in percentage (0-100), else in proportion (0-1)
+                        const yMax = axisRanges.yMax || 1;
                         return sortedPoints.map((point, i) => {
                           const x = 50 + (point.time / axisRanges.xMax) * 340;
-                          const y = 240 - point.survival * 220;
+                          const normalizedSurvival = point.survival / yMax;
+                          const y = 240 - normalizedSurvival * 220;
                           const isNew = point.isNew;
                           
                           if (isNew) {
