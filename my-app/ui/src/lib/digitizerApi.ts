@@ -72,6 +72,16 @@ export interface IPDPatientRecord {
   arm: string;
 }
 
+export interface IPDValidationMetrics {
+  hazardRatio: number;
+  hrLowerCI: number;
+  hrUpperCI: number;
+  pValue: number;
+  armStats: { arm: string; nPatients: number; events: number }[];
+  referenceArm?: string;
+  comparisonArm?: string;
+}
+
 export interface IPDGenerationResult {
   success: boolean;
   files: {
@@ -83,6 +93,7 @@ export interface IPDGenerationResult {
     medianFollowup: number;
     data?: IPDPatientRecord[];  // Include actual IPD data for download
   }[];
+  validation?: IPDValidationMetrics;  // HR, CI, p-value if 2+ arms
   error?: string;
 }
 

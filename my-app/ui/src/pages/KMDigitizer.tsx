@@ -8,7 +8,7 @@ import { PDFViewer } from '@/components/digitizer/PDFViewer';
 import { ExtractionProgress } from '@/components/digitizer/ExtractionProgress';
 import { DataEditor } from '@/components/digitizer/DataEditor';
 import { DataPoint } from '@/components/digitizer/AffineTransformEditor';
-import { extractKMCurve, generatePseudoIPD, IPDGenerationResult } from '@/lib/digitizerApi';
+import { extractKMCurve, generatePseudoIPD, IPDGenerationResult, IPDValidationMetrics } from '@/lib/digitizerApi';
 import { 
   ChevronLeft,
   Upload,
@@ -176,6 +176,7 @@ export function KMDigitizer() {
   const [editingArmId, setEditingArmId] = useState<string | null>(null);
   const [isGeneratingIPD, setIsGeneratingIPD] = useState(false);
   const [generatedIPD, setGeneratedIPD] = useState<IPDGenerationResult['files'] | null>(null);
+  const [ipdValidation, setIpdValidation] = useState<IPDValidationMetrics | null>(null);
 
   // Global settings
   const [granularity, setGranularity] = useState(0.25);
@@ -558,7 +559,21 @@ export function KMDigitizer() {
         console.log('[KMDigitizer] IPD generation successful:', result.files);
         // Store generated IPD for download
         setGeneratedIPD(result.files);
-        alert(`Pseudo-IPD generated successfully!\n\nGenerated ${result.files.length} parquet files:\n${result.files.map(f => `• ${f.endpoint} - ${f.arm}: ${f.nPatients} patients, ${f.events} events`).join('\n')}\n\nFiles are ready for survival analysis. You can download the IPD data using the download buttons below.`);
+        // Store validation metrics if available
+        if (result.validation) {
+          console.log('[KMDigitizer] IPD validation:', result.validation);
+          setIpdValidation(result.validation);
+        } else {
+          setIpdValidation(null);
+        }
+        
+        // Build success message
+        let message = `Pseudo-IPD generated successfully!\n\nGenerated ${result.files.length} parquet files:\n${result.files.map(f => `• ${f.endpoint} - ${f.arm}: ${f.nPatients} patients, ${f.events} events`).join('\n')}`;
+        if (result.validation) {
+          message += `\n\nValidation Metrics:\nHR: ${result.validation.hazardRatio} (95% CI: ${result.validation.hrLowerCI}–${result.validation.hrUpperCI})\np-value: ${result.validation.pValue}`;
+        }
+        message += '\n\nFiles are ready for survival analysis.';
+        alert(message);
       } else {
         throw new Error(result.error || 'IPD generation failed');
       }
@@ -1571,6 +1586,68 @@ export function KMDigitizer() {
                   </div>
                 </div>
 
+                {/* IPD Validation Metrics Card - shown after generation with 2+ arms */}
+                {ipdValidation && (
+                  <div className="mt-6 p-4 border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                    <h4 className="font-medium mb-3 flex items-center gap-2 text-blue-800 dark:text-blue-200">
+                      <Info className="h-5 w-5" />
+                      IPD Validation Metrics
+                    </h4>
+                    
+                    {/* HR Display */}
+                    <div className="mb-4 p-3 bg-white dark:bg-gray-800 rounded-md border border-blue-100 dark:border-blue-900">
+                      <div className="text-center">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Hazard Ratio</span>
+                        <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                          {ipdValidation.hazardRatio.toFixed(2)}
+                          <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                            (95% CI: {ipdValidation.hrLowerCI.toFixed(2)}–{ipdValidation.hrUpperCI.toFixed(2)})
+                          </span>
+                        </div>
+                        <div className="mt-1">
+                          <span className={`text-sm font-medium ${ipdValidation.pValue < 0.05 ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                            p = {ipdValidation.pValue < 0.0001 ? '< 0.0001' : ipdValidation.pValue.toFixed(4)}
+                            {ipdValidation.pValue < 0.05 && ' (significant)'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Per-arm statistics table */}
+                    {ipdValidation.armStats && ipdValidation.armStats.length > 0 && (
+                      <div className="mb-3">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-blue-200 dark:border-blue-700">
+                              <th className="text-left py-2 text-blue-700 dark:text-blue-300 font-medium">Arm</th>
+                              <th className="text-right py-2 text-blue-700 dark:text-blue-300 font-medium">Patients</th>
+                              <th className="text-right py-2 text-blue-700 dark:text-blue-300 font-medium">Events</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ipdValidation.armStats.map((stat, idx) => (
+                              <tr key={idx} className="border-b border-blue-100 dark:border-blue-800 last:border-0">
+                                <td className="py-2 text-gray-700 dark:text-gray-300">
+                                  {stat.arm}
+                                  {idx === 0 && ipdValidation.referenceArm && (
+                                    <span className="ml-2 text-xs bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded">ref</span>
+                                  )}
+                                </td>
+                                <td className="py-2 text-right text-gray-700 dark:text-gray-300">{stat.nPatients}</td>
+                                <td className="py-2 text-right text-gray-700 dark:text-gray-300">{stat.events}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-blue-600 dark:text-blue-400">
+                      HR {'<'} 1 indicates lower hazard (better survival) for the comparison arm vs reference
+                    </p>
+                  </div>
+                )}
+
                 {/* IPD Download Section - shown after generation */}
                 {generatedIPD && generatedIPD.length > 0 && (
                   <div className="mt-6 p-4 border-2 border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 rounded-lg">
@@ -1606,7 +1683,7 @@ export function KMDigitizer() {
                       ))}
                     </div>
                     <p className="text-xs text-green-600 dark:text-green-400 mt-3">
-                      💡 These CSV files contain the same data as the parquet files and can be used for analysis in R, Python, or Excel.
+                      These CSV files contain the same data as the parquet files and can be used for analysis in R, Python, or Excel.
                     </p>
                   </div>
                 )}

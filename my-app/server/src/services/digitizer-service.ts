@@ -65,6 +65,16 @@ export interface IPDPatientRecord {
   arm: string;
 }
 
+export interface IPDValidationMetrics {
+  hazardRatio: number;
+  hrLowerCI: number;
+  hrUpperCI: number;
+  pValue: number;
+  armStats: { arm: string; nPatients: number; events: number }[];
+  referenceArm?: string;
+  comparisonArm?: string;
+}
+
 export interface IPDGenerationResult {
   success: boolean;
   files: {
@@ -76,6 +86,7 @@ export interface IPDGenerationResult {
     medianFollowup: number;
     data?: IPDPatientRecord[];  // Include actual IPD data for download
   }[];
+  validation?: IPDValidationMetrics;  // HR, CI, p-value if 2+ arms
   error?: string;
 }
 
@@ -376,9 +387,67 @@ export async function generatePseudoIPD(
     console.log(`[IPD Generation] Complete. Generated ${files.length} files.`);
     console.log(`[IPD Generation] Files available for survival analysis at: ${outputDir}`);
 
+    // If we have 2+ arms with data, calculate validation metrics (HR, CI, p-value)
+    let validation: IPDValidationMetrics | undefined;
+    
+    const armsWithData = files.filter(f => f.data && f.data.length > 0);
+    if (armsWithData.length >= 2) {
+      try {
+        console.log(`[IPD Validation] Calculating HR for ${armsWithData.length} arms...`);
+        
+        const validationResponse = await fetch(`${PYTHON_SERVICE_URL}/validate-ipd`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            arms: armsWithData.map(f => ({
+              arm: f.arm,
+              data: f.data,
+            })),
+          }),
+        });
+
+        if (validationResponse.ok) {
+          const validationResult = await validationResponse.json() as {
+            success: boolean;
+            hazardRatio?: number;
+            hrLowerCI?: number;
+            hrUpperCI?: number;
+            pValue?: number;
+            armStats?: { arm: string; nPatients: number; events: number }[];
+            referenceArm?: string;
+            comparisonArm?: string;
+            error?: string;
+          };
+
+          if (validationResult.success && validationResult.hazardRatio !== undefined) {
+            validation = {
+              hazardRatio: validationResult.hazardRatio,
+              hrLowerCI: validationResult.hrLowerCI!,
+              hrUpperCI: validationResult.hrUpperCI!,
+              pValue: validationResult.pValue!,
+              armStats: validationResult.armStats || [],
+              referenceArm: validationResult.referenceArm,
+              comparisonArm: validationResult.comparisonArm,
+            };
+            console.log(`[IPD Validation] HR: ${validation.hazardRatio} (${validation.hrLowerCI}-${validation.hrUpperCI}), p=${validation.pValue}`);
+          } else {
+            console.warn(`[IPD Validation] Validation failed: ${validationResult.error || 'Unknown error'}`);
+          }
+        } else {
+          console.warn(`[IPD Validation] Validation endpoint returned ${validationResponse.status}`);
+        }
+      } catch (validationError) {
+        console.warn(`[IPD Validation] Could not calculate validation metrics:`, validationError);
+        // Don't fail the whole operation if validation fails
+      }
+    } else {
+      console.log(`[IPD Validation] Skipping validation - need 2+ arms with data (have ${armsWithData.length})`);
+    }
+
     return {
       success: true,
       files,
+      validation,
     };
   } catch (error) {
     console.error('IPD generation error:', error);

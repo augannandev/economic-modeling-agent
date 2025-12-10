@@ -477,6 +477,121 @@ async def generate_ipd(request: IPDGenerationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class IPDValidationRequest(BaseModel):
+    """Request for IPD validation - calculates HR between arms"""
+    arms: List[Dict[str, Any]]  # [{arm: str, data: [{patient_id, time, event, arm}]}]
+
+
+@app.post("/validate-ipd")
+async def validate_ipd(request: IPDValidationRequest):
+    """
+    Validate reconstructed IPD by calculating Hazard Ratio between arms.
+    
+    Uses Cox Proportional Hazards model to compute:
+    - Hazard Ratio (HR)
+    - 95% Confidence Interval
+    - P-value
+    - Per-arm statistics (n patients, events)
+    
+    Requires at least 2 arms to compute HR.
+    """
+    try:
+        import pandas as pd
+        import numpy as np
+        from lifelines import CoxPHFitter
+        
+        if len(request.arms) < 2:
+            return {
+                "success": False,
+                "error": "At least 2 arms required to calculate hazard ratio"
+            }
+        
+        # Combine all arm data into single DataFrame
+        all_data = []
+        arm_stats = []
+        arm_names = []
+        
+        for i, arm_info in enumerate(request.arms):
+            arm_name = arm_info.get("arm", f"Arm_{i}")
+            arm_data = arm_info.get("data", [])
+            arm_names.append(arm_name)
+            
+            # Calculate per-arm statistics
+            n_patients = len(arm_data)
+            n_events = sum(1 for p in arm_data if p.get("event", 0) == 1)
+            
+            arm_stats.append({
+                "arm": arm_name,
+                "nPatients": n_patients,
+                "events": n_events
+            })
+            
+            # Add to combined dataset with treatment indicator
+            for patient in arm_data:
+                all_data.append({
+                    "time": float(patient.get("time", 0)),
+                    "event": int(patient.get("event", 0)),
+                    "treatment": i  # 0 = first arm (reference), 1+ = other arms
+                })
+        
+        if len(all_data) == 0:
+            return {
+                "success": False,
+                "error": "No patient data provided"
+            }
+        
+        # Create DataFrame
+        df = pd.DataFrame(all_data)
+        
+        # Ensure valid data
+        df = df.dropna()
+        df = df[df["time"] > 0]
+        
+        if len(df) < 10:
+            return {
+                "success": False,
+                "error": "Insufficient data for Cox model (need at least 10 patients)"
+            }
+        
+        # Fit Cox Proportional Hazards model
+        cph = CoxPHFitter()
+        cph.fit(df, duration_col="time", event_col="event")
+        
+        # Extract HR, CI, and p-value for treatment effect
+        summary = cph.summary
+        
+        if "treatment" not in summary.index:
+            return {
+                "success": False,
+                "error": "Could not estimate treatment effect"
+            }
+        
+        hr = float(summary.loc["treatment", "exp(coef)"])
+        hr_lower = float(summary.loc["treatment", "exp(coef) lower 95%"])
+        hr_upper = float(summary.loc["treatment", "exp(coef) upper 95%"])
+        p_value = float(summary.loc["treatment", "p"])
+        
+        return {
+            "success": True,
+            "hazardRatio": round(hr, 3),
+            "hrLowerCI": round(hr_lower, 3),
+            "hrUpperCI": round(hr_upper, 3),
+            "pValue": round(p_value, 4),
+            "armStats": arm_stats,
+            "referenceArm": arm_names[0],
+            "comparisonArm": arm_names[1] if len(arm_names) > 1 else None
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": f"Validation failed: {str(e)}",
+            "details": traceback.format_exc()
+        }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for deployment platforms"""
