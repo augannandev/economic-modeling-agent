@@ -58,6 +58,13 @@ export interface IPDGenerationRequest {
   riskTable: RiskTableRow[];
 }
 
+export interface IPDPatientRecord {
+  patient_id: number;
+  time: number;
+  event: number;
+  arm: string;
+}
+
 export interface IPDGenerationResult {
   success: boolean;
   files: {
@@ -67,6 +74,7 @@ export interface IPDGenerationResult {
     nPatients: number;
     events: number;
     medianFollowup: number;
+    data?: IPDPatientRecord[];  // Include actual IPD data for download
   }[];
   error?: string;
 }
@@ -346,6 +354,7 @@ export async function generatePseudoIPD(
         events: number;
         censored?: number;
         median_followup: number;
+        data?: IPDPatientRecord[];  // Actual IPD data for download
       }
 
       const result = await response.json() as PythonIPDResponse;
@@ -360,6 +369,7 @@ export async function generatePseudoIPD(
         nPatients: result.n_patients,
         events: result.events,
         medianFollowup: result.median_followup,
+        data: result.data,  // Include IPD data for download
       });
     }
 

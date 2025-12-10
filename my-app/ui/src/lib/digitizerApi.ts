@@ -65,6 +65,13 @@ export interface IPDGenerationRequest {
   riskTable: RiskTableRow[];
 }
 
+export interface IPDPatientRecord {
+  patient_id: number;
+  time: number;
+  event: number;
+  arm: string;
+}
+
 export interface IPDGenerationResult {
   success: boolean;
   files: {
@@ -74,6 +81,7 @@ export interface IPDGenerationResult {
     nPatients: number;
     events: number;
     medianFollowup: number;
+    data?: IPDPatientRecord[];  // Include actual IPD data for download
   }[];
   error?: string;
 }

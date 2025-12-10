@@ -1558,16 +1558,33 @@ class IPDBuilder:
         total_censored = sum(n_censored)
         print(f"[IPDBuilder] Final integer events: {total_events}, censored: {total_censored}")
         
-        # Generate patient records
+        # Generate patient records with IMPROVED event timing
         patient_records = []
         patient_id = 0
+        
+        # Log event distribution for debugging
+        print(f"[IPDBuilder] 📈 Event distribution across {len(times)-1} intervals:")
+        for i in range(min(len(times)-1, 6)):  # Show first 6 intervals
+            t_start = times[i]
+            t_end = times[i+1] if i < len(times)-1 else times[i]
+            print(f"[IPDBuilder]    [{t_start:.1f}-{t_end:.1f}mo]: {n_events[i]} events, {n_censored[i]} censored")
+        if len(times) > 7:
+            print(f"[IPDBuilder]    ... and {len(times)-7} more intervals")
         
         for i, (t, n_evt, n_cens) in enumerate(zip(times, n_events, n_censored)):
             if i < len(times) - 1:
                 interval_length = times[i + 1] - t
                 
-                for _ in range(n_evt):
-                    event_time = t + np.random.uniform(0, interval_length)
+                # IMPROVED: Place events in the LATTER half of interval (closer to step drop)
+                # This better matches how KM step functions work
+                for j in range(n_evt):
+                    # Distribute events in the latter 60% of interval with some spread
+                    base_offset = 0.4 + 0.5 * (j / max(1, n_evt))  # Range: 0.4 to 0.9 of interval
+                    small_jitter = np.random.uniform(-0.05, 0.05) * interval_length
+                    event_time = t + (base_offset * interval_length) + small_jitter
+                    # Ensure event time stays within interval
+                    event_time = max(t + 0.001, min(event_time, times[i + 1] - 0.001))
+                    
                     patient_records.append({
                         "patient_id": patient_id,
                         "time": event_time,
@@ -1576,10 +1593,17 @@ class IPDBuilder:
                     })
                     patient_id += 1
             
-            for _ in range(n_cens):
+            # Censored patients: place at start of interval (matches at-risk counting)
+            for j in range(n_cens):
+                if i < len(times) - 1:
+                    # Small spread within first 30% of interval
+                    censor_time = t + np.random.uniform(0, 0.3) * (times[i + 1] - t)
+                else:
+                    censor_time = t
+                    
                 patient_records.append({
                     "patient_id": patient_id,
-                    "time": t,
+                    "time": censor_time,
                     "event": 0,
                     "arm": arm_name,
                 })
@@ -1590,6 +1614,9 @@ class IPDBuilder:
         # Normalize to target population
         ipd_df = self._normalize_population(ipd_df, initial_n, arm_name)
         
+        # VALIDATION: Check reconstructed at-risk vs published table
+        validation_results = self._validate_atrisk_numbers(ipd_df, km_df)
+        
         return {
             "success": True,
             "data": ipd_df.to_dict('records'),
@@ -1599,69 +1626,153 @@ class IPDBuilder:
                 "n_censored": int((ipd_df["event"] == 0).sum()),
                 "median_followup": float(ipd_df["time"].median()),
                 "arm": arm_name
-            }
+            },
+            "validation": validation_results
+        }
+    
+    def _validate_atrisk_numbers(self, ipd_df, km_df) -> dict:
+        """Validate reconstructed at-risk numbers against published table.
+        
+        This is a critical validation step to ensure the IPD accurately reflects
+        the censoring pattern from the original study.
+        
+        Args:
+            ipd_df: Reconstructed IPD
+            km_df: KM data with n_risk from published table
+            
+        Returns:
+            Dict with validation results
+        """
+        if "n_risk" not in km_df.columns:
+            return {"validated": False, "reason": "no at-risk data available"}
+        
+        # Calculate at-risk from IPD at each table timepoint
+        published_times = km_df["time"].values
+        published_nrisk = km_df["n_risk"].values
+        
+        discrepancies = []
+        
+        for t, published_n in zip(published_times, published_nrisk):
+            # Count patients still at risk at time t in reconstructed IPD
+            ipd_atrisk = len(ipd_df[ipd_df["time"] >= t])
+            
+            # Calculate absolute and relative difference
+            abs_diff = ipd_atrisk - published_n
+            rel_diff = abs_diff / published_n if published_n > 0 else 0
+            
+            discrepancies.append({
+                "time": float(t),
+                "published": int(published_n),
+                "reconstructed": int(ipd_atrisk),
+                "abs_diff": int(abs_diff),
+                "rel_diff_pct": round(rel_diff * 100, 1),
+            })
+        
+        # Calculate summary statistics
+        import pandas as pd
+        disc_df = pd.DataFrame(discrepancies)
+        mean_abs_diff = disc_df["abs_diff"].abs().mean()
+        mean_rel_diff = disc_df["rel_diff_pct"].abs().mean()
+        max_rel_diff = disc_df["rel_diff_pct"].abs().max()
+        
+        # Determine quality grade
+        if max_rel_diff <= 10:
+            quality = "excellent"
+        elif max_rel_diff <= 20:
+            quality = "good"
+        elif max_rel_diff <= 30:
+            quality = "acceptable"
+        else:
+            quality = "poor"
+        
+        print(f"[IPDBuilder] 📊 At-risk validation: mean diff = {mean_abs_diff:.1f} patients ({mean_rel_diff:.1f}%)")
+        print(f"[IPDBuilder]    Max relative diff: {max_rel_diff:.1f}% - Quality: {quality.upper()}")
+        
+        if quality == "poor":
+            # Show worst discrepancies
+            worst = disc_df.nlargest(3, "rel_diff_pct", keep="first")
+            for _, row in worst.iterrows():
+                print(f"[IPDBuilder]    ⚠️ t={row['time']:.1f}mo: published={row['published']}, reconstructed={row['reconstructed']}")
+        
+        return {
+            "validated": True,
+            "quality": quality,
+            "mean_abs_diff": round(mean_abs_diff, 1),
+            "mean_rel_diff_pct": round(mean_rel_diff, 1),
+            "max_rel_diff_pct": round(max_rel_diff, 1),
+            "details": discrepancies
         }
     
     def _align_atrisk_data(self, km_df, atrisk_df):
-        """Align at-risk data with KM timepoints using hybrid approach.
+        """Align at-risk data with KM timepoints using AT-RISK TABLE AS PRIMARY GRID.
         
-        Uses linear interpolation between known at-risk values and constrains
-        n_risk to be monotonically non-increasing and consistent with survival.
+        IMPROVED APPROACH (v2): Use at-risk table timepoints as the primary reconstruction
+        grid, and interpolate survival values at those points. This avoids the error 
+        accumulation that occurs when using fine-grained KM curves with interpolated at-risk.
+        
+        The key insight is that the published at-risk table is ACCURATE, but the digitized
+        KM curve has many more points. Rather than interpolating at-risk (which introduces
+        errors), we use the at-risk table timepoints directly and interpolate survival.
         """
         import pandas as pd
         
         if atrisk_df.empty:
-            # Estimate from survival - use initial population of 100 (or infer from context)
+            # No at-risk data - fall back to using KM curve with estimated at-risk
             km_df_copy = km_df.copy()
-            # Assume 100% survival at time 0 means initial_n patients
             max_survival = km_df_copy["survival"].max()
             if max_survival > 0:
                 initial_n = 100  # Default assumption
                 km_df_copy["n_risk"] = (initial_n * km_df_copy["survival"] / max_survival).round().astype(int)
             else:
                 km_df_copy["n_risk"] = 100
-            print(f"[IPDBuilder] No at-risk data - estimating from survival curve")
+            print(f"[IPDBuilder] ⚠️ No at-risk data - estimating from survival curve")
             return km_df_copy
         
-        km_df_copy = km_df.copy().sort_values("time").reset_index(drop=True)
-        atrisk_times = atrisk_df["time"].values
-        atrisk_nrisk = atrisk_df["atRisk"].values
+        # IMPROVED: Use at-risk table timepoints as PRIMARY reconstruction grid
+        atrisk_df_copy = atrisk_df.copy().sort_values("time").reset_index(drop=True)
+        km_df_sorted = km_df.copy().sort_values("time").reset_index(drop=True)
         
-        # For each KM timepoint, estimate the number at risk
-        estimated_nrisk = []
-        for km_time in km_df_copy["time"]:
-            if km_time in atrisk_times:
-                # Exact match - use the actual at-risk value
-                idx = np.where(atrisk_times == km_time)[0][0]
-                n_risk = atrisk_nrisk[idx]
-            else:
-                # Interpolate between known at-risk values
-                n_risk = np.interp(km_time, atrisk_times, atrisk_nrisk)
-                n_risk = max(0, round(n_risk))
-            estimated_nrisk.append(n_risk)
+        # Extract KM curve data for interpolation
+        km_times = km_df_sorted["time"].values
+        km_survival = km_df_sorted["survival"].values
         
-        km_df_copy["n_risk"] = estimated_nrisk
+        # Build result using at-risk table as the primary grid
+        result_rows = []
         
-        # Ensure n_risk is monotonically non-increasing (patients can only leave, not join)
-        km_df_copy["n_risk"] = km_df_copy["n_risk"].cummin()
+        for _, row in atrisk_df_copy.iterrows():
+            t = row["time"]
+            n_risk = row["atRisk"]
+            
+            # Interpolate survival from KM curve at this timepoint
+            survival = np.interp(t, km_times, km_survival)
+            
+            result_rows.append({
+                "time": t,
+                "survival": float(survival),
+                "n_risk": int(n_risk),
+            })
         
-        # Additional constraint: n_risk should be consistent with survival
-        # If survival drops dramatically but n_risk doesn't, adjust n_risk
-        initial_n = km_df_copy["n_risk"].iloc[0]
-        for i in range(len(km_df_copy)):
-            survival = km_df_copy["survival"].iloc[i]
-            # Rough estimate: n_risk shouldn't be much higher than survival * initial_n
-            max_reasonable_nrisk = max(1, survival * initial_n * 1.2)  # 20% buffer
-            if km_df_copy["n_risk"].iloc[i] > max_reasonable_nrisk:
-                km_df_copy.iloc[i, km_df_copy.columns.get_loc("n_risk")] = round(max_reasonable_nrisk)
+        result_df = pd.DataFrame(result_rows)
         
-        # Final monotonicity check
-        km_df_copy["n_risk"] = km_df_copy["n_risk"].cummin()
+        # Ensure survival is monotonically non-increasing
+        result_df["survival"] = result_df["survival"].cummin()
         
-        print(f"[IPDBuilder] Aligned {len(km_df_copy)} KM timepoints with at-risk data")
-        print(f"[IPDBuilder] At-risk range: {km_df_copy['n_risk'].iloc[0]} → {km_df_copy['n_risk'].iloc[-1]} patients")
+        # Ensure n_risk is monotonically non-increasing
+        result_df["n_risk"] = result_df["n_risk"].cummin()
         
-        return km_df_copy
+        print(f"[IPDBuilder] ✅ Using at-risk table as primary grid: {len(result_df)} timepoints")
+        print(f"[IPDBuilder]    At-risk range: {result_df['n_risk'].iloc[0]} → {result_df['n_risk'].iloc[-1]} patients")
+        print(f"[IPDBuilder]    Survival range: {result_df['survival'].iloc[0]:.3f} → {result_df['survival'].iloc[-1]:.3f}")
+        
+        # Log comparison with original KM curve for debugging
+        if len(km_df_sorted) > 0:
+            km_final_survival = km_survival[-1]
+            recon_final_survival = result_df['survival'].iloc[-1]
+            diff = abs(km_final_survival - recon_final_survival)
+            if diff > 0.05:
+                print(f"[IPDBuilder] ⚠️ Survival endpoint mismatch: KM={km_final_survival:.3f}, Recon={recon_final_survival:.3f}")
+        
+        return result_df
     
     def _normalize_population(self, ipd_df, target_n: int, arm_name: str):
         """Normalize IPD to exact study population size"""

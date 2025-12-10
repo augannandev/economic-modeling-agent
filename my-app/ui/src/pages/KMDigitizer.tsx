@@ -8,7 +8,7 @@ import { PDFViewer } from '@/components/digitizer/PDFViewer';
 import { ExtractionProgress } from '@/components/digitizer/ExtractionProgress';
 import { DataEditor } from '@/components/digitizer/DataEditor';
 import { DataPoint } from '@/components/digitizer/AffineTransformEditor';
-import { extractKMCurve, generatePseudoIPD } from '@/lib/digitizerApi';
+import { extractKMCurve, generatePseudoIPD, IPDGenerationResult } from '@/lib/digitizerApi';
 import { 
   ChevronLeft,
   Upload,
@@ -175,6 +175,7 @@ export function KMDigitizer() {
   const [editingEndpointIndex, setEditingEndpointIndex] = useState<number | null>(null);
   const [editingArmId, setEditingArmId] = useState<string | null>(null);
   const [isGeneratingIPD, setIsGeneratingIPD] = useState(false);
+  const [generatedIPD, setGeneratedIPD] = useState<IPDGenerationResult['files'] | null>(null);
 
   // Global settings
   const [granularity, setGranularity] = useState(0.25);
@@ -555,11 +556,9 @@ export function KMDigitizer() {
 
       if (result.success) {
         console.log('[KMDigitizer] IPD generation successful:', result.files);
-        alert(`Pseudo-IPD generated successfully!\n\nGenerated ${result.files.length} parquet files:\n${result.files.map(f => `• ${f.endpoint} - ${f.arm}: ${f.nPatients} patients, ${f.events} events`).join('\n')}\n\nFiles are ready for survival analysis.`);
-        
-    if (projectId) {
-      navigate(`/projects/${projectId}`);
-        }
+        // Store generated IPD for download
+        setGeneratedIPD(result.files);
+        alert(`Pseudo-IPD generated successfully!\n\nGenerated ${result.files.length} parquet files:\n${result.files.map(f => `• ${f.endpoint} - ${f.arm}: ${f.nPatients} patients, ${f.events} events`).join('\n')}\n\nFiles are ready for survival analysis. You can download the IPD data using the download buttons below.`);
       } else {
         throw new Error(result.error || 'IPD generation failed');
       }
@@ -611,6 +610,61 @@ export function KMDigitizer() {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     link.setAttribute('download', `km_data_all_endpoints.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Download IPD data as CSV (reconstructed patient data)
+  const handleDownloadIPDCSV = (file: IPDGenerationResult['files'][0]) => {
+    if (!file.data || file.data.length === 0) {
+      alert('No IPD data available for download');
+      return;
+    }
+    
+    const csvContent = [
+      'patient_id,time,event,arm',
+      ...file.data.map(p => `${p.patient_id},${p.time},${p.event},${p.arm}`)
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `ipd_${file.endpoint}_${file.arm}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Download all IPD data as combined CSV
+  const handleDownloadAllIPDCSV = () => {
+    if (!generatedIPD || generatedIPD.length === 0) {
+      alert('No IPD data available for download');
+      return;
+    }
+    
+    const allData: string[] = ['patient_id,time,event,arm,endpoint'];
+    let patientCounter = 0;
+    
+    generatedIPD.forEach(file => {
+      if (file.data) {
+        file.data.forEach(p => {
+          allData.push(`${patientCounter++},${p.time},${p.event},${p.arm},${file.endpoint}`);
+        });
+      }
+    });
+    
+    const csvContent = allData.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `ipd_all_endpoints.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -1486,25 +1540,76 @@ export function KMDigitizer() {
                     <ChevronLeft className="h-4 w-4 mr-2" />
                     Back to Edit
                   </Button>
-                  <Button 
-                    onClick={handleGenerateIPD} 
-                    disabled={isGeneratingIPD}
-                    className="gap-2"
-                    size="lg"
-                  >
-                    {isGeneratingIPD ? (
-                      <>
-                        <span className="animate-spin">⏳</span>
-                        Generating IPD...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="h-4 w-4" />
-                        Generate Pseudo-IPD
-                      </>
+                  <div className="flex gap-2">
+                    {generatedIPD && generatedIPD.length > 0 && (
+                      <Button 
+                        variant="outline"
+                        onClick={() => projectId && navigate(`/projects/${projectId}`)}
+                        className="gap-2"
+                      >
+                        Go to Project
+                      </Button>
                     )}
-                  </Button>
+                    <Button 
+                      onClick={handleGenerateIPD} 
+                      disabled={isGeneratingIPD}
+                      className="gap-2"
+                      size="lg"
+                    >
+                      {isGeneratingIPD ? (
+                        <>
+                          <span className="animate-spin">⏳</span>
+                          Generating IPD...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" />
+                          Generate Pseudo-IPD
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
+
+                {/* IPD Download Section - shown after generation */}
+                {generatedIPD && generatedIPD.length > 0 && (
+                  <div className="mt-6 p-4 border-2 border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 rounded-lg">
+                    <h4 className="font-medium mb-3 flex items-center gap-2 text-green-800 dark:text-green-200">
+                      <CheckCircle2 className="h-5 w-5" />
+                      IPD Generated Successfully - Download Files
+                    </h4>
+                    <p className="text-sm text-green-700 dark:text-green-300 mb-4">
+                      Download the reconstructed individual patient data (IPD) as CSV files.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button 
+                        variant="default" 
+                        size="sm" 
+                        onClick={handleDownloadAllIPDCSV}
+                        className="gap-2 bg-green-600 hover:bg-green-700"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download All IPD (CSV)
+                      </Button>
+                      {generatedIPD.map((file, idx) => (
+                        <Button 
+                          key={idx}
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => handleDownloadIPDCSV(file)}
+                          className="gap-2 border-green-300 text-green-700 hover:bg-green-100 dark:border-green-700 dark:text-green-300 dark:hover:bg-green-900"
+                          disabled={!file.data}
+                        >
+                          <Download className="h-4 w-4" />
+                          {file.endpoint} - {file.arm} ({file.nPatients} pts)
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-green-600 dark:text-green-400 mt-3">
+                      💡 These CSV files contain the same data as the parquet files and can be used for analysis in R, Python, or Excel.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

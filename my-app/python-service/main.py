@@ -466,7 +466,8 @@ async def generate_ipd(request: IPDGenerationRequest):
             "n_patients": summary.get("n_patients", len(ipd_df)),
             "events": summary.get("n_events", int(ipd_df['event'].sum())),
             "censored": summary.get("n_censored", int((ipd_df['event'] == 0).sum())),
-            "median_followup": summary.get("median_followup", float(ipd_df['time'].median()))
+            "median_followup": summary.get("median_followup", float(ipd_df['time'].median())),
+            "data": result["ipd"]  # Include actual IPD data for download
         }
         
     except ImportError as e:
