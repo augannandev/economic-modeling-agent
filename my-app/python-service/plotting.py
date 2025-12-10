@@ -103,6 +103,10 @@ def _generate_actual_model_predictions(
             'event': original_data['event']
         })
         
+        # Handle zero/negative times - parametric models require t > 0
+        # This is critical for distributions like Log-Normal that fail on non-positive values
+        df.loc[df['time'] <= 0, 'time'] = 1e-5
+        
         try:
             if approach == 'one-piece':
                 # Refit one-piece model
