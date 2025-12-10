@@ -35,12 +35,16 @@ async function main() {
         console.log('\n3. Detecting Cutpoints (Likelihood Ratio Test)...');
 
         console.log('   > For Pembrolizumab:');
-        const cutpointPembro = await detectPiecewiseCutpoint(data.pembro, 'pembro');
-        console.log(`     Detected Cutpoint: ${cutpointPembro.toFixed(2)} months`);
+        const cutpointResultPembro = await detectPiecewiseCutpoint(data.pembro, 'pembro');
+        console.log(`     Detected Cutpoint: ${cutpointResultPembro.cutpoint.toFixed(2)} months (${cutpointResultPembro.cutpoint_weeks.toFixed(1)} weeks)`);
+        console.log(`     LRT Statistic: ${cutpointResultPembro.lrt_statistic.toFixed(2)}, p-value: ${cutpointResultPembro.lrt_pvalue.toFixed(4)}`);
+        console.log(`     Events: ${cutpointResultPembro.n_events_pre} pre, ${cutpointResultPembro.n_events_post} post`);
 
         console.log('   > For Chemotherapy:');
-        const cutpointChemo = await detectPiecewiseCutpoint(data.chemo, 'chemo');
-        console.log(`     Detected Cutpoint: ${cutpointChemo.toFixed(2)} months`);
+        const cutpointResultChemo = await detectPiecewiseCutpoint(data.chemo, 'chemo');
+        console.log(`     Detected Cutpoint: ${cutpointResultChemo.cutpoint.toFixed(2)} months (${cutpointResultChemo.cutpoint_weeks.toFixed(1)} weeks)`);
+        console.log(`     LRT Statistic: ${cutpointResultChemo.lrt_statistic.toFixed(2)}, p-value: ${cutpointResultChemo.lrt_pvalue.toFixed(4)}`);
+        console.log(`     Events: ${cutpointResultChemo.n_events_pre} pre, ${cutpointResultChemo.n_events_post} post`);
 
         // 4. Fit Piecewise Model (Example)
         console.log('\n4. Fitting Piecewise Exponential Model (Pembro)...');
@@ -48,7 +52,7 @@ async function main() {
             data.pembro,
             'pembro',
             'exponential',
-            cutpointPembro
+            cutpointResultPembro.cutpoint
         );
         console.log('   Model Fitted Successfully!');
         console.log(`   - AIC: ${modelResult.aic?.toFixed(2)}`);

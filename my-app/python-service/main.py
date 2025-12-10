@@ -178,15 +178,29 @@ async def fit_one_piece(request: ModelFitRequest):
 
 @app.post("/detect-cutpoint")
 async def detect_cutpoint(request: ModelFitRequest):
-    """Detect optimal cutpoint for piecewise model"""
+    """
+    Detect optimal cutpoint for piecewise model using Chow test (Likelihood Ratio Test).
+    
+    Returns full statistics including:
+    - cutpoint: optimal cutpoint in original time units (months)
+    - cutpoint_weeks: optimal cutpoint in weeks
+    - lrt_statistic: Likelihood Ratio Test statistic
+    - lrt_pvalue: p-value from chi-squared(1) distribution
+    - ll_null: log-likelihood of one-piece model
+    - ll_alternative: log-likelihood of piecewise model
+    - n_events_pre: events before cutpoint
+    - n_events_post: events after cutpoint
+    - n_at_risk_pre: patients at risk before cutpoint
+    - n_at_risk_post: patients at risk after cutpoint
+    """
     try:
         from piecewise_models import detect_cutpoint_chow_test
-        cutpoint = detect_cutpoint_chow_test(
+        result = detect_cutpoint_chow_test(
             request.data.dict(),
             weeks_start=request.weeks_start or 12,
             weeks_end=request.weeks_end or 52
         )
-        return {"cutpoint": cutpoint}
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

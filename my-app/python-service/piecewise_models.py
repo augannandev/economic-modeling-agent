@@ -5,11 +5,24 @@ from scipy import stats
 from survival_models import fit_one_piece_model
 from typing import Dict
 
-def detect_cutpoint_chow_test(data: Dict, weeks_start: int = 12, weeks_end: int = 52) -> float:
+def detect_cutpoint_chow_test(data: Dict, weeks_start: int = 12, weeks_end: int = 52) -> Dict:
     """
     Detect optimal cutpoint using a rigorous Likelihood Ratio Test (Chow Test for Survival).
     Scans potential cutpoints and finds the one that maximizes the improvement in model fit
     (Likelihood Ratio) when allowing hazard rates to differ before and after the cutpoint.
+    
+    Returns:
+        Dict containing:
+        - cutpoint: float (in original time units, typically months)
+        - cutpoint_weeks: float (in weeks)
+        - lrt_statistic: float (Likelihood Ratio Test statistic)
+        - lrt_pvalue: float (p-value from chi-squared with 1 df)
+        - ll_null: float (log-likelihood of one-piece model)
+        - ll_alternative: float (log-likelihood of piecewise model)
+        - n_events_pre: int (events before cutpoint)
+        - n_events_post: int (events after cutpoint)
+        - n_at_risk_pre: int (patients at risk before cutpoint)
+        - n_at_risk_post: int (patients at risk after cutpoint)
     """
     df = pd.DataFrame(data)
     
@@ -29,6 +42,11 @@ def detect_cutpoint_chow_test(data: Dict, weeks_start: int = 12, weeks_end: int 
     
     best_cutpoint = weeks_start
     max_lrt = -1.0
+    best_ll_alt = None
+    best_n_events_pre = 0
+    best_n_events_post = 0
+    best_n_at_risk_pre = 0
+    best_n_at_risk_post = 0
     
     # Fit null model (constant hazard over full duration)
     null_fitter = ExponentialFitter().fit(df['time_weeks'], df['event'])
@@ -44,19 +62,18 @@ def detect_cutpoint_chow_test(data: Dict, weeks_start: int = 12, weeks_end: int 
         pre_data = df[pre_mask]
         post_data = df[~pre_mask].copy()
         
+        # Count events and at-risk in each segment
+        n_events_pre = int(pre_data['event'].sum())
+        n_events_post = int(post_data['event'].sum())
+        n_at_risk_pre = len(pre_data)
+        n_at_risk_post = len(post_data)
+        
         # Ensure sufficient events in both segments for stable fitting
-        if pre_data['event'].sum() < 5 or post_data['event'].sum() < 5:
+        if n_events_pre < 5 or n_events_post < 5:
             continue
             
         try:
             # Fit early segment
-            # For early segment, we treat it as right-censored at cutpoint? 
-            # No, the data is already split. Deaths before cutpoint are events.
-            # Censored before cutpoint are censored.
-            # Those surviving past cutpoint are censored at cutpoint for the early fit?
-            # Actually, for a piecewise constant hazard model:
-            # L_total = L_early + L_late
-            
             # 1. Early Fit:
             # Patients who die before cutpoint: observed death.
             # Patients who survive past cutpoint: censored at cutpoint.
@@ -84,14 +101,34 @@ def detect_cutpoint_chow_test(data: Dict, weeks_start: int = 12, weeks_end: int 
             if lrt > max_lrt:
                 max_lrt = lrt
                 best_cutpoint = cutpoint
+                best_ll_alt = ll_alt
+                best_n_events_pre = n_events_pre
+                best_n_events_post = n_events_post
+                best_n_at_risk_pre = n_at_risk_pre
+                best_n_at_risk_post = n_at_risk_post
                 
         except Exception:
             continue
     
-    # Convert back to original time units
-    if is_months:
-        return best_cutpoint / 4.33
-    return float(best_cutpoint)
+    # Calculate p-value from LRT statistic (chi-squared with 1 degree of freedom)
+    # The piecewise model has 2 parameters (lambda_early, lambda_late) vs 1 for null (lambda)
+    lrt_pvalue = 1 - stats.chi2.cdf(max_lrt, df=1) if max_lrt > 0 else 1.0
+    
+    # Convert cutpoint back to original time units
+    cutpoint_months = best_cutpoint / 4.33 if is_months else best_cutpoint
+    
+    return {
+        "cutpoint": float(cutpoint_months),
+        "cutpoint_weeks": float(best_cutpoint),
+        "lrt_statistic": float(max_lrt),
+        "lrt_pvalue": float(lrt_pvalue),
+        "ll_null": float(ll_null),
+        "ll_alternative": float(best_ll_alt) if best_ll_alt is not None else float(ll_null),
+        "n_events_pre": best_n_events_pre,
+        "n_events_post": best_n_events_post,
+        "n_at_risk_pre": best_n_at_risk_pre,
+        "n_at_risk_post": best_n_at_risk_post
+    }
 
 def fit_piecewise_model(data: Dict, arm: str, distribution: str, cutpoint: float) -> Dict:
     """Fit piecewise parametric model"""

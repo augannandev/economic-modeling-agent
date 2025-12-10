@@ -46,6 +46,19 @@ export interface PHTestsResult {
   crossing_time?: number | null;
 }
 
+export interface ChowTestResult {
+  cutpoint: number;           // In original time units (months)
+  cutpoint_weeks: number;     // In weeks
+  lrt_statistic: number;      // Likelihood Ratio Test statistic
+  lrt_pvalue: number;         // p-value from chi-squared(1)
+  ll_null: number;            // Log-likelihood of one-piece model
+  ll_alternative: number;     // Log-likelihood of piecewise model
+  n_events_pre: number;       // Events before cutpoint
+  n_events_post: number;      // Events after cutpoint
+  n_at_risk_pre: number;      // Patients at risk before cutpoint
+  n_at_risk_post: number;     // Patients at risk after cutpoint
+}
+
 /**
  * Load parquet data files
  */
@@ -136,9 +149,10 @@ export async function fitOnePieceModel(
 }
 
 /**
- * Detect piecewise cutpoint using Chow test
+ * Detect piecewise cutpoint using Chow test (Likelihood Ratio Test).
+ * Returns full statistics for the synthesis agent to analyze.
  */
-export async function detectPiecewiseCutpoint(data: ParquetData, arm: string, weeksStart: number = 12, weeksEnd: number = 52): Promise<number> {
+export async function detectPiecewiseCutpoint(data: ParquetData, arm: string, weeksStart: number = 12, weeksEnd: number = 52): Promise<ChowTestResult> {
   const response = await fetch(`${PYTHON_SERVICE_URL}/detect-cutpoint`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -155,8 +169,7 @@ export async function detectPiecewiseCutpoint(data: ParquetData, arm: string, we
     throw new Error(`Failed to detect cutpoint: ${error}`);
   }
 
-  const result = await response.json() as { cutpoint: number };
-  return result.cutpoint;
+  return response.json() as Promise<ChowTestResult>;
 }
 
 /**

@@ -3,7 +3,9 @@ import { HumanMessage } from '@langchain/core/messages';
 import { NICE_DSU_TSD_14_PRINCIPLES, NICE_DSU_TSD_21_PRINCIPLES } from '../lib/nice-guidelines';
 import { getRAGService, getSimpleRAGContext } from '../lib/rag-service';
 import { formatMarkdown } from '../lib/markdown-formatter';
+import type { ChowTestResult } from '../services/python-service';
 import path from 'path';
+import fs from 'fs';
 
 export interface SynthesisReportResult {
   within_approach_rankings: Record<string, unknown>;
@@ -273,6 +275,121 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[]): string {
 }
 
 /**
+ * Load clinical context for cutpoint justification
+ */
+function loadCutpointClinicalContext(): string {
+  try {
+    // Try multiple possible paths (development vs production)
+    const possiblePaths = [
+      path.join(process.cwd(), 'data', 'rag_docs', 'cutpoint_clinical_context.md'),
+      '/app/data/rag_docs/cutpoint_clinical_context.md',  // Docker/Railway
+      path.join(__dirname, '..', 'data', 'rag_docs', 'cutpoint_clinical_context.md'),
+    ];
+    
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p, 'utf-8');
+      }
+    }
+    
+    console.warn('[SynthesisGenerator] Clinical context file not found, using fallback');
+    return '## Clinical Context\nNo clinical context available.';
+  } catch (error) {
+    console.error('[SynthesisGenerator] Error loading clinical context:', error);
+    return '## Clinical Context\nError loading clinical context.';
+  }
+}
+
+/**
+ * Generate cutpoint justification using LLM
+ */
+export async function generateCutpointJustification(
+  cutpointResults: { chemo: ChowTestResult; pembro: ChowTestResult }
+): Promise<string> {
+  const llm = createReasoningLLM();
+  const clinicalContext = loadCutpointClinicalContext();
+  
+  // Format cutpoint analysis as JSON for the prompt
+  const cutpointAnalysis = {
+    chemotherapy: {
+      arm: 'Chemotherapy',
+      cutpoint_months: cutpointResults.chemo.cutpoint,
+      cutpoint_weeks: cutpointResults.chemo.cutpoint_weeks,
+      lrt_statistic: cutpointResults.chemo.lrt_statistic,
+      lrt_pvalue: cutpointResults.chemo.lrt_pvalue,
+      events_before_cutpoint: cutpointResults.chemo.n_events_pre,
+      events_after_cutpoint: cutpointResults.chemo.n_events_post,
+      patients_at_risk_before: cutpointResults.chemo.n_at_risk_pre,
+      patients_at_risk_after: cutpointResults.chemo.n_at_risk_post,
+    },
+    pembrolizumab: {
+      arm: 'Pembrolizumab',
+      cutpoint_months: cutpointResults.pembro.cutpoint,
+      cutpoint_weeks: cutpointResults.pembro.cutpoint_weeks,
+      lrt_statistic: cutpointResults.pembro.lrt_statistic,
+      lrt_pvalue: cutpointResults.pembro.lrt_pvalue,
+      events_before_cutpoint: cutpointResults.pembro.n_events_pre,
+      events_after_cutpoint: cutpointResults.pembro.n_events_post,
+      patients_at_risk_before: cutpointResults.pembro.n_at_risk_pre,
+      patients_at_risk_after: cutpointResults.pembro.n_at_risk_post,
+    }
+  };
+
+  const prompt = `Generate a 2-paragraph justification for the piecewise model cutpoint for each treatment arm. Each justification should be 120-150 words total.
+
+---
+
+## Clinical Context
+
+${clinicalContext}
+
+---
+
+## Statistical Analysis Results
+
+${JSON.stringify(cutpointAnalysis, null, 2)}
+
+---
+
+## Output Requirements
+
+Generate justification for each arm with a structure similar to this:
+
+### Chemotherapy: ${cutpointResults.chemo.cutpoint_weeks.toFixed(0)} weeks (${cutpointResults.chemo.cutpoint.toFixed(1)} months)
+
+**Paragraph 1 (3-4 sentences):**
+- Open with cutpoint selection statement
+- Cite Chow test result (LRT statistic, p-value)
+- Explain relationship to PFS median (before/after, by how much)
+- State key clinical rationale (crossover for chemo, responder plateau for pembro)
+
+**Paragraph 2 (2-3 sentences):**
+- Explain why timing aligns with treatment mechanism
+- Note events distribution (adequate/excellent for fitting)
+- Brief robustness statement (if results stable across ±4 week variation)
+
+### Pembrolizumab: ${cutpointResults.pembro.cutpoint_weeks.toFixed(0)} weeks (${cutpointResults.pembro.cutpoint.toFixed(1)} months)
+
+(Same structure as above)
+
+---
+
+## Style Guidelines
+- Use precise numerical values from the statistical analysis
+- Technical but readable prose (no bullet points in output)
+- Reference biological mechanisms from clinical context
+- Keep each arm's justification to 120-150 words
+- Professional regulatory tone`;
+
+  const messages = [new HumanMessage({ content: prompt })];
+  const response = await llm.invoke(messages);
+  let content = response.content as string;
+  
+  // Format and return
+  return formatMarkdown(content);
+}
+
+/**
  * Generate cross-model synthesis report (3000 words)
  */
 export async function synthesizeCrossModel(
@@ -285,6 +402,10 @@ export async function synthesizeCrossModel(
     rationale: string;
     crossing_detected?: boolean;
     crossing_time?: number | null;
+  },
+  cutpointResults?: {
+    chemo: ChowTestResult;
+    pembro: ChowTestResult;
   }
 ): Promise<SynthesisReportResult> {
   const llm = createReasoningLLM();
@@ -449,6 +570,19 @@ FORMATTING REQUIREMENTS:
   // Append the three comparison tables
   content += '\n\n---\n\n';
   content += buildAllComparisonTables(allModelAssessments);
+
+  // Append cutpoint justification if available
+  if (cutpointResults) {
+    try {
+      const cutpointJustification = await generateCutpointJustification(cutpointResults);
+      content += '\n\n---\n\n';
+      content += '## Piecewise Models Cutpoint Analysis\n\n';
+      content += cutpointJustification;
+    } catch (error) {
+      console.error('[SynthesisGenerator] Error generating cutpoint justification:', error);
+      // Continue without cutpoint justification if it fails
+    }
+  }
 
   // Append base case model plots (short-term and long-term)
   const plotsSection = generatePlotsSection(baseCaseModels);

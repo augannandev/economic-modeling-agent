@@ -42,6 +42,10 @@ export interface SurvivalAnalysisState {
     pembro: any;
   };
   ph_tests?: any;
+  cutpoint_results?: {
+    chemo: any;  // ChowTestResult
+    pembro: any; // ChowTestResult
+  };
   fitted_models: Array<{
     model_id: string;
     model_result: any;
@@ -393,10 +397,15 @@ async function fitPiecewiseModels(state: SurvivalAnalysisState): Promise<Partial
   const db = await getDatabase(getDatabaseUrl()!);
   const fittedModels = [...(state.fitted_models || [])];
   let modelOrder = fittedModels.length + 1;
+  
+  // Store cutpoint results for synthesis
+  const cutpointResults: { chemo?: any; pembro?: any } = {};
 
   for (const arm of ARMS) {
-    // Detect cutpoint for this arm
-    const cutpoint = await detectCutpointTool(state.data[arm], arm, 12, 52);
+    // Detect cutpoint for this arm (returns full Chow test statistics)
+    const cutpointResult = await detectCutpointTool(state.data[arm], arm, 12, 52);
+    cutpointResults[arm] = cutpointResult;
+    const cutpoint = cutpointResult.cutpoint; // Extract numeric cutpoint for model fitting
 
     for (const distribution of DISTRIBUTIONS) {
       // Check for pause
@@ -549,6 +558,7 @@ async function fitPiecewiseModels(state: SurvivalAnalysisState): Promise<Partial
 
   return {
     fitted_models: fittedModels,
+    cutpoint_results: cutpointResults as { chemo: any; pembro: any },
     workflow_state: 'SPLINE_FITTING',
     progress: fittedModels.length,
   };
@@ -761,7 +771,7 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
     } : undefined,
   }));
 
-  const synthesis = await synthesizeCrossModel(assessmentData, state.ph_tests);
+  const synthesis = await synthesizeCrossModel(assessmentData, state.ph_tests, state.cutpoint_results);
 
   // Save synthesis report to database
   const db = await getDatabase(getDatabaseUrl()!);

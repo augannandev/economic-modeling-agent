@@ -1,7 +1,7 @@
 # External Survival Benchmarks for Long-Term Extrapolation Validation
-**Version:** 1.0  
-**Purpose:**  
-Provide independent real-world survival benchmarks for Stage IV NSCLC to evaluate the **clinical plausibility** of long-term extrapolated OS/PFS curves.  
+**Version:** 1.1 (Final)
+**Purpose:**
+Provide independent real-world survival benchmarks for Stage IV NSCLC to evaluate the **clinical plausibility** of long-term extrapolated OS/PFS curves.
 These benchmarks are **not from the trial** and serve as **external anchors** for tail validity, HTA justification, sensitivity analyses, and model rejection.
 
 ---
@@ -9,58 +9,42 @@ These benchmarks are **not from the trial** and serve as **external anchors** fo
 # 1. Chemotherapy Era Benchmarks (No Immunotherapy)
 
 ## 1.1 SEER (US National Registry)
-
-**Source:** Surveillance, Epidemiology, and End Results Program  
-**Population:** Stage IV NSCLC, 2010–2015 (pre-IO era)  
-**Characteristics:**  
-- All ages  
-- Mixed histology  
-- Mixed performance status (ECOG 0–4)  
-- Real-world treatment distribution  
+**Source:** Surveillance, Epidemiology, and End Results Program
+**Population:** Stage IV NSCLC, 2010–2014 (Pre-IO era strict cut-off)
+**Characteristics:** Unselected, real-world, mixed ECOG 0–4.
 
 ### Survival Rates
-| Timepoint | OS |
+| Timepoint | OS (Historical Floor) |
 |----------|-----|
 | **1 year** | **31.3%** |
 | **2 years** | **16.6%** |
-| **5 years** | **5.8%** |
-| **10 years** | ~**2%** |
+| **5 years** | **4.2% – 5.8%** |
+| **10 years** | **< 2%** |
 
-**Interpretation:**  
-SEER provides a **minimum baseline** for chemotherapy-only advanced NSCLC.  
-5-year OS ≈ 6% is a **lower bound** for any realistic chemo arm.
+**Interpretation:**
+SEER provides the **minimum baseline**.
+**5-year OS ≈ 4%** is the absolute **lower bound** for any realistic chemo arm. If a model drops below this, it predicts outcomes worse than the historical unselected population (implausible for a trial).
 
 ---
 
 ## 1.2 UK NLCA (National Lung Cancer Audit)
-
-**Population:** Stage IV NSCLC  
-**Stratification:** By ECOG performance status  
-
-### ECOG 0–1 Survival
-| Timepoint | OS |
-|----------|-----|
-| **1 year** | ~**45%** |
-| **5 years** | ~**5%** |
-
-**Interpretation:**  
-More trial-like population; corrects SEER upward for ECOG selection.
+**Population:** Stage IV NSCLC, ECOG 0–1 Only.
+**Interpretation:** Corrects SEER upward for Performance Status.
+* **1-year OS:** ~45%
+* **5-year OS:** ~5–6%
 
 ---
 
-## 1.3 Historical Platinum-Doublet Trials
-
-**Source:** Pilkington et al., Thorax 2015 – Pooled RCTs (2000–2014)  
-**Regimens:** Cisplatin/carboplatin doublets  
+## 1.3 Modern Platinum-Doublet Trials (Control Arms)
+**Source:** Control arms of KEYNOTE-189, KEYNOTE-407, CheckMate 9LA.
+**Population:** "Olympic Athletes" (Selected ECOG 0-1, no comorbidities).
 
 ### Survival
-- **Median OS:** 10–13 months  
-- **1-year OS:** 40–50%  
-- **2-year OS:** 15–25%  
-- **5-year OS:** 5–8% (selected RCT populations)
+* **Median OS:** 11–13 months
+* **5-year OS:** **9–11%** (Best-case chemo without heavy crossover)
 
-**Interpretation:**  
-Represents typical RCT survival for first-line chemotherapy in Stage IV NSCLC.
+**Interpretation:**
+Represents the "Optimized Baseline" for clinical trials.
 
 ---
 
@@ -70,118 +54,81 @@ These represent **acceptable**, **borderline**, and **implausible** long-term su
 
 | 5-year OS | Interpretation |
 |----------|----------------|
-| **<4%** | ⚠ Too pessimistic (below SEER) |
-| **4–6%** | General population (SEER) |
-| **6–10%** | Trial-like (ECOG 0–1) |
-| **10–16%** | Chemo with **substantial crossover to IO** |
-| **>20%** | ❌ Implausible — reject model |
+| **<4%** | ⚠ **Too pessimistic** (Below SEER floor) |
+| **4–6%** | **Real-World Baseline** (SEER/Unselected) |
+| **6–11%** | **Trial Standard** (ECOG 0–1, Optimized care) |
+| **12–18%** | **Crossover Impacted** (Chemo → IO allowed) |
+| **>20%** | ❌ **Implausible** — Reject model |
 
-**Notes for HTA reproducibility:**  
-NICE TA447 explicitly rejected lognormal/gamma because they predicted **10–20%+ 5-year OS** for chemotherapy, which contradicted all known real-world benchmarks.
+**Notes for HTA reproducibility:**
+NICE TAA explicitly rejects models predicting **>15–20% 5-year OS** for pure chemotherapy, as this implies a "cure fraction" inconsistent with the mechanism of action.
 
 ---
 
 # 3. PD-1 Inhibitor (Immunotherapy) Benchmarks
 
-## 3.1 KEYNOTE-001 (Pembrolizumab)
+## 3.1 KEYNOTE-001 & KEYNOTE-024 (Long-term Follow-up)
+**Source:** Garon et al., JCO 2019; Reck et al., JCO 2021.
 
-**Source:** Garon et al., JCO 2019  
-**Population:** Treatment-naïve and previously treated NSCLC  
-**PD-L1 stratified data**
-
-### 5-year OS Rates
+### 5-year OS Benchmarks
 | Subgroup | 5-year OS |
 |----------|-----------|
-| **Treatment-naïve (all-comers)** | **23.2%** |
-| **Treatment-naïve, PD-L1 ≥50%** | **29.6%** |
-| **Previously treated (all-comers)** | **15.5%** |
-| **Previously treated, PD-L1 ≥50%** | **25.0%** |
+| **Treatment-naïve (PD-L1 ≥50%)** | **31.9%** (KN-024) |
+| **Treatment-naïve (All-comers)** | **23.2%** (KN-001) |
+| **Previously treated (All-comers)** | **15.5%** |
 
-**Interpretation:**  
-These values define the **lower and upper bounds** for immune-checkpoint inhibitor tail survival.
-
----
-
-## 3.2 CheckMate (Nivolumab) – Second Line
-
-### Results
-- **5-year OS:** **13–16%**
-
-**Interpretation:**  
-Confirms PD-1 inhibitors generate durable long-term survival even after progression on chemo.
+**Interpretation:**
+These values define the **target corridors** for immune-checkpoint inhibitor tail survival.
 
 ---
 
-# 4. Survival Plausibility Ranges – Pembrolizumab Arm
+# 4. Survival Plausibility Ranges – Pembrolizumab (IO) Arm
 
 | Timepoint | Expected Range | Interpretation |
 |----------|----------------|----------------|
-| **5 years** | **20–30%** | Expected range for 1L PD-L1 ≥50% |
-|            | **15–20%** | Borderline low (worse than 2L) |
-|            | **30–35%** | Upper plausible (requires justification) |
-|            | **>40%** | ❌ Implausible – reject |
+| **5 years** | **25–35%** | **Expected** (1L PD-L1 ≥50%) |
+|            | **20–25%** | **Conservative** (All-comers or lower expression) |
+|            | **<15%** | ⚠ **Pessimistic** (Worse than 2nd-line historical) |
+|            | **>40%** | ❌ **Implausible** (Exceeds best observed trial data) |
 
 | Timepoint | Expected |
 |----------|----------|
-| **10 years** | **8–15%** |
+| **10 years** | **10–15%** |
 
 ---
 
 # 5. Population Adjustment Framework
 
-These modifiers help determine whether deviations from benchmark survival are justified.
-
 | Factor | Expected Impact on OS |
 |--------|------------------------|
-| ECOG 0–1 vs mixed | +10–30% |
-| Age <70 vs all ages | +5–15% |
-| PD-L1 ≥50% vs unselected | +20–40% (for IO) |
-| Treatment-naïve vs mixed | +10–20% |
-| Crossover to immunotherapy | +50–150% for chemo-labeled arm |
-
-**Example Adjustment:**  
-SEER 5-year OS = **5.8%**  
-Trial-selected (ECOG 0–1, younger) → **8–12%**  
-With crossover → **12–16%** upper plausible bound.
+| **ECOG 0–1 Selection** | Shifts 5y OS from **4% → ~10%** |
+| **PD-L1 ≥50% Selection** | Shifts 5y OS from **~23% → ~32%** (for IO) |
+| **Heavy Crossover (>50%)** | Shifts Chemo 5y OS from **10% → 15%+** |
 
 ---
 
 # 6. Model Plausibility Decision Rules
 
-## 6.1 Deviation Test  
+## 6.1 Deviation Test
 For any model prediction **M** and benchmark **B**:
 
-\[
+$$
 Deviation = \frac{M - B}{B} \times 100\%
-\]
+$$
 
-| Deviation | Interpretation |
-|----------|----------------|
-| **<50%** | ✓ Plausible |
-| **50–100%** | ⚠ Moderate concern |
-| **100–200%** | 🚨 High concern |
-| **>200%** | ❌ Implausible — reject |
-
----
+* **>100% Deviation:** Flag as "High Concern" (e.g., Model predicts 20% Chemo survival when Benchmark is 10%).
 
 ## 6.2 Hard-Fail Rules (Chemo Arm)
-
-Reject model if:
-
-- **S(5y) > 20%**  
-- **S(10y) > 5%**  
-- Hazards **decrease indefinitely**  
-- Curve shows **plateau/cure behavior** (not expected in metastatic NSCLC)  
-
----
+**Reject model if:**
+1.  **S(5y) > 18%** (Unless >50% crossover explicitly modeled).
+2.  **S(10y) > 6%**.
+3.  **Hazard Function:** Decreases indefinitely toward 0 (Implies cure).
+4.  **Shape:** Shows a definitive "plateau" above 5%.
 
 ## 6.3 Hard-Fail Rules (Pembrolizumab Arm)
-
-Reject model if:
-
-- **S(5y) < 15%** (worse than 2L PD-1 outcomes)  
-- **S(5y) > 40%** (biologically implausible for metastatic NSCLC)  
-- Curve suggests **growing survival plateau** inconsistent with known IO biology  
+**Reject model if:**
+1.  **S(5y) < 15%** (Fails to beat historical 2nd-line).
+2.  **S(5y) > 45%** (Biologically unrealistic for metastatic disease).
 
 ---
 
@@ -190,11 +137,11 @@ Reject model if:
 ```json
 {
   "chemo_stageIV": {
-    "5y": { "expected": 0.08, "range": [0.05, 0.12], "hard_max": 0.20 },
-    "10y": { "expected": 0.02, "range": [0.01, 0.04] }
+    "5y": { "expected": 0.08, "range": [0.04, 0.12], "hard_max": 0.18 },
+    "10y": { "expected": 0.02, "range": [0.01, 0.05] }
   },
   "pembro_1L_PDL1_50": {
-    "5y": { "expected": 0.25, "range": [0.20, 0.35], "hard_max": 0.40 },
-    "10y": { "expected": 0.10, "range": [0.08, 0.15] }
+    "5y": { "expected": 0.32, "range": [0.25, 0.38], "hard_max": 0.45 },
+    "10y": { "expected": 0.14, "range": [0.10, 0.18] }
   }
 }
