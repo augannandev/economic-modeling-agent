@@ -189,7 +189,6 @@ export function KMDigitizer() {
   const [selectedSupabaseProjectId, setSelectedSupabaseProjectId] = useState<string | null>(null);
   const [supabaseConfigured, setSupabaseConfigured] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
-  const [showFullProjectForm, setShowFullProjectForm] = useState(false);
   const [newProject, setNewProject] = useState<CreateProjectOptions>({
     name: '',
     therapeuticArea: '',
@@ -237,7 +236,6 @@ export function KMDigitizer() {
           comparator: '',
         });
         setIsCreatingProject(false);
-        setShowFullProjectForm(false);
       } else if (result.error) {
         alert(`Failed to create project: ${result.error}`);
       }
@@ -249,7 +247,6 @@ export function KMDigitizer() {
   
   const resetProjectForm = () => {
     setIsCreatingProject(false);
-    setShowFullProjectForm(false);
     setNewProject({
       name: '',
       therapeuticArea: '',
@@ -888,27 +885,6 @@ export function KMDigitizer() {
                       New Project
                     </Button>
                   </>
-                ) : !showFullProjectForm ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={newProject.name}
-                      onChange={(e) => setNewProject(p => ({ ...p, name: e.target.value }))}
-                      placeholder="Project name..."
-                      className="h-9 px-3 text-sm border rounded-md bg-background w-[200px]"
-                      onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-                      autoFocus
-                    />
-                    <Button size="sm" onClick={handleCreateProject} disabled={!newProject.name.trim()}>
-                      Create
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => setShowFullProjectForm(true)}>
-                      More Details
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={resetProjectForm}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
                 ) : (
                   <Button size="sm" variant="ghost" onClick={resetProjectForm}>
                     <X className="h-4 w-4 mr-1" />
@@ -918,8 +894,8 @@ export function KMDigitizer() {
               </div>
             )}
             
-            {/* Full Project Creation Form */}
-            {isCreatingProject && showFullProjectForm && (
+            {/* Project Creation Form */}
+            {isCreatingProject && (
               <div className="w-full pt-4 border-t mt-4">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
