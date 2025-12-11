@@ -242,12 +242,18 @@ export function SurvivalAnalysis() {
               )}
 
               <Button 
-                variant="outline" 
-                size="icon"
+                variant={isChatOpen ? "default" : "outline"} 
                 onClick={() => setIsChatOpen(!isChatOpen)}
-                className={cn(isChatOpen && "bg-primary text-primary-foreground")}
+                className={cn(
+                  "gap-2 relative",
+                  !isChatOpen && "animate-pulse-subtle border-primary/50"
+                )}
               >
                 <MessageSquare className="h-4 w-4" />
+                <span className="hidden sm:inline">Ask AI Assistant</span>
+                {!isChatOpen && (
+                  <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-green-500 border-2 border-background" />
+                )}
               </Button>
 
               {/* Project Selector */}
