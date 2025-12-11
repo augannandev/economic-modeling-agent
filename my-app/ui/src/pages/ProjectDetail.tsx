@@ -62,8 +62,9 @@ export function ProjectDetail() {
       setArms(armsData.arms);
       setEndpoints(endpointsData.endpoints);
       setDataSources(dataSourcesData.data_sources);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load project:', err);
+      alert(`Failed to load project: ${err?.message || JSON.stringify(err)}`);
     } finally {
       setLoading(false);
     }
