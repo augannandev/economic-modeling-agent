@@ -145,8 +145,10 @@ export function ProjectCreate() {
 
       // Navigate to project detail
       navigate(`/projects/${project.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create project');
+    } catch (err: any) {
+      console.error('Project creation error:', err);
+      const errorMsg = err?.message || err?.error || 'Failed to create project';
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

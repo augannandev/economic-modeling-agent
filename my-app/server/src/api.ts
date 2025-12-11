@@ -1134,9 +1134,11 @@ projectRoutes.post('/', async (c) => {
 
     return c.json({ project });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Failed to create project:', errorMessage);
     return c.json({
-      error: 'Failed to create project',
-      details: error instanceof Error ? error.message : 'Unknown error',
+      error: `Failed to create project: ${errorMessage}`,
+      details: errorMessage,
     }, 500);
   }
 });
