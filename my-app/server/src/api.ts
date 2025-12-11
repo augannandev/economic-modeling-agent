@@ -1407,7 +1407,7 @@ digitizerRoutes.post('/validate', async (c) => {
 digitizerRoutes.post('/generate-ipd', async (c) => {
   try {
     const body = await c.req.json();
-    const { endpoints } = body as { endpoints: IPDGenerationRequest[] };
+    const { endpoints, projectId } = body as { endpoints: IPDGenerationRequest[]; projectId?: string };
 
     if (!endpoints || endpoints.length === 0) {
       return c.json({ error: 'At least one endpoint is required' }, 400);
@@ -1424,7 +1424,8 @@ digitizerRoutes.post('/generate-ipd', async (c) => {
       }
     }
 
-    const result = await generatePseudoIPD(endpoints);
+    // Pass projectId to save IPD to Supabase if provided
+    const result = await generatePseudoIPD(endpoints, projectId);
 
     if (!result.success) {
       return c.json({ error: result.error || 'IPD generation failed' }, 500);

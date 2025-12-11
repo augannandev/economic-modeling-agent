@@ -551,9 +551,10 @@ export function KMDigitizer() {
         });
       });
 
-      console.log(`[KMDigitizer] Generating IPD for ${ipdRequests.length} arm(s)`);
+      console.log(`[KMDigitizer] Generating IPD for ${ipdRequests.length} arm(s)${projectId ? ` (project: ${projectId})` : ''}`);
       
-      const result = await generatePseudoIPD(ipdRequests);
+      // Pass projectId to save IPD to database if available
+      const result = await generatePseudoIPD(ipdRequests, projectId || undefined);
 
       if (result.success) {
         console.log('[KMDigitizer] IPD generation successful:', result.files);
@@ -571,6 +572,9 @@ export function KMDigitizer() {
         let message = `Pseudo-IPD generated successfully!\n\nGenerated ${result.files.length} parquet files:\n${result.files.map(f => `• ${f.endpoint} - ${f.arm}: ${f.nPatients} patients, ${f.events} events`).join('\n')}`;
         if (result.validation) {
           message += `\n\nValidation Metrics:\nHR: ${result.validation.hazardRatio} (95% CI: ${result.validation.hrLowerCI}–${result.validation.hrUpperCI})\np-value: ${result.validation.pValue}`;
+        }
+        if (result.savedToDatabase) {
+          message += '\n\n✓ IPD saved to project database.';
         }
         message += '\n\nFiles are ready for survival analysis.';
         alert(message);

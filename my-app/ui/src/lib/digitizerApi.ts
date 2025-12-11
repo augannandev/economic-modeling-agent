@@ -94,6 +94,8 @@ export interface IPDGenerationResult {
     data?: IPDPatientRecord[];  // Include actual IPD data for download
   }[];
   validation?: IPDValidationMetrics;  // HR, CI, p-value if 2+ arms
+  savedToDatabase?: boolean;  // Whether IPD was saved to Supabase
+  projectId?: string;         // Project ID if saved to database
   error?: string;
 }
 
@@ -223,12 +225,15 @@ export async function validateKMData(
 
 /**
  * Generate Pseudo-IPD from KM data
+ * @param endpoints - Array of endpoint data to generate IPD for
+ * @param projectId - Optional project ID to save IPD to database
  */
 export async function generatePseudoIPD(
-  endpoints: IPDGenerationRequest[]
+  endpoints: IPDGenerationRequest[],
+  projectId?: string
 ): Promise<IPDGenerationResult> {
   try {
-    console.log(`[DigitizerAPI] Generating IPD for ${endpoints.length} endpoints`);
+    console.log(`[DigitizerAPI] Generating IPD for ${endpoints.length} endpoints${projectId ? ` (project: ${projectId})` : ''}`);
 
     const response = await fetch(`${API_BASE}/api/v1/digitizer/generate-ipd`, {
       method: 'POST',
@@ -236,7 +241,7 @@ export async function generatePseudoIPD(
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
       },
-      body: JSON.stringify({ endpoints }),
+      body: JSON.stringify({ endpoints, projectId }),
     });
 
     if (!response.ok) {
@@ -245,7 +250,7 @@ export async function generatePseudoIPD(
     }
 
     const result = await response.json();
-    console.log(`[DigitizerAPI] IPD generation successful`);
+    console.log(`[DigitizerAPI] IPD generation successful${result.savedToDatabase ? ' (saved to database)' : ''}`);
     return result;
   } catch (error) {
     console.error('IPD generation API error:', error);

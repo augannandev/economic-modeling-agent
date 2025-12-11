@@ -1,6 +1,7 @@
 import { getPythonServiceUrl } from '../lib/env';
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { saveIPD, isSupabaseConfigured } from '../lib/supabase';
 
 const PYTHON_SERVICE_URL = getPythonServiceUrl();
 
@@ -87,6 +88,8 @@ export interface IPDGenerationResult {
     data?: IPDPatientRecord[];  // Include actual IPD data for download
   }[];
   validation?: IPDValidationMetrics;  // HR, CI, p-value if 2+ arms
+  savedToDatabase?: boolean;  // Whether IPD was saved to Supabase
+  projectId?: string;         // Project ID if saved to database
   error?: string;
 }
 
@@ -300,11 +303,14 @@ function getIPDDataDirectory(): string {
  * 
  * Files are saved to DATA_DIRECTORY with naming convention:
  * ipd_EndpointType.{endpoint}_{arm}.parquet
- * 
+ *
  * This matches the expected format for survival analysis.
+ * 
+ * If projectId is provided and Supabase is configured, IPD will also be saved to the database.
  */
 export async function generatePseudoIPD(
-  endpoints: IPDGenerationRequest[]
+  endpoints: IPDGenerationRequest[],
+  projectId?: string
 ): Promise<IPDGenerationResult> {
   try {
     // Use the same DATA_DIRECTORY that survival analysis expects
@@ -444,10 +450,53 @@ export async function generatePseudoIPD(
       console.log(`[IPD Validation] Skipping validation - need 2+ arms with data (have ${armsWithData.length})`);
     }
 
+    // Save to Supabase if projectId is provided and Supabase is configured
+    let savedToDatabase = false;
+    if (projectId && isSupabaseConfigured()) {
+      console.log(`[IPD Storage] Saving IPD to Supabase for project ${projectId}...`);
+      
+      for (const file of files) {
+        if (file.data && file.data.length > 0) {
+          try {
+            const result = await saveIPD({
+              project_id: projectId,
+              endpoint_type: file.endpoint,
+              arm: file.arm,
+              ipd_data: file.data,
+              n_patients: file.nPatients,
+              n_events: file.events,
+              median_followup: file.medianFollowup,
+              validation_hr: validation?.hazardRatio,
+              validation_hr_lower: validation?.hrLowerCI,
+              validation_hr_upper: validation?.hrUpperCI,
+              validation_pvalue: validation?.pValue,
+            });
+            
+            if (result.error) {
+              console.warn(`[IPD Storage] Failed to save ${file.endpoint}-${file.arm}: ${result.error}`);
+            } else {
+              console.log(`[IPD Storage] Saved ${file.endpoint}-${file.arm} to Supabase`);
+              savedToDatabase = true;
+            }
+          } catch (saveError) {
+            console.warn(`[IPD Storage] Error saving ${file.endpoint}-${file.arm}:`, saveError);
+          }
+        }
+      }
+      
+      if (savedToDatabase) {
+        console.log(`[IPD Storage] Successfully saved IPD to Supabase for project ${projectId}`);
+      }
+    } else if (projectId && !isSupabaseConfigured()) {
+      console.log(`[IPD Storage] Supabase not configured - IPD not saved to database`);
+    }
+
     return {
       success: true,
       files,
       validation,
+      savedToDatabase,
+      projectId: savedToDatabase ? projectId : undefined,
     };
   } catch (error) {
     console.error('IPD generation error:', error);
