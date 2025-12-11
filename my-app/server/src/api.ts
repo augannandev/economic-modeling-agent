@@ -1121,6 +1121,8 @@ projectRoutes.post('/', async (c) => {
       description: body.description,
       therapeutic_area: body.therapeutic_area,
       disease_condition: body.disease_condition,
+      population: body.population,
+      nct_id: body.nct_id,
       intervention: body.intervention,
       comparator: body.comparator,
       status: 'draft',

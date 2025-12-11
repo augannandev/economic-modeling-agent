@@ -20,6 +20,12 @@ export const projects = pgTable('projects', {
   // Disease/condition (e.g., NSCLC, Melanoma)
   disease_condition: text('disease_condition'),
   
+  // Patient population (e.g., PD-L1 TPS ≥50%, ECOG PS 0-1)
+  population: text('population'),
+  
+  // ClinicalTrials.gov identifier (e.g., NCT02142738)
+  nct_id: text('nct_id'),
+  
   // Drug/intervention being evaluated
   intervention: text('intervention'),
   

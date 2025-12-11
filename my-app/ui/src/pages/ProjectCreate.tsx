@@ -58,6 +58,8 @@ export function ProjectCreate() {
     description: '',
     therapeutic_area: '',
     disease_condition: '',
+    population: '',
+    nct_id: '',
     intervention: '',
     comparator: '',
     endpoints: [] as string[],
@@ -112,6 +114,8 @@ export function ProjectCreate() {
         description: formData.description || undefined,
         therapeutic_area: formData.therapeutic_area || undefined,
         disease_condition: formData.disease_condition || undefined,
+        population: formData.population || undefined,
+        nct_id: formData.nct_id || undefined,
         intervention: formData.intervention || undefined,
         comparator: formData.comparator || undefined,
       });
@@ -249,19 +253,30 @@ export function ProjectCreate() {
           {/* Step 2: Clinical Details */}
           {currentStep === 1 && (
             <>
-              <div className="space-y-2">
-                <Label htmlFor="therapeutic_area">Therapeutic Area</Label>
-                <select
-                  id="therapeutic_area"
-                  className="w-full p-2 border rounded-lg bg-background"
-                  value={formData.therapeutic_area}
-                  onChange={(e) => updateFormData('therapeutic_area', e.target.value)}
-                >
-                  <option value="">Select therapeutic area...</option>
-                  {THERAPEUTIC_AREAS.map((area) => (
-                    <option key={area} value={area}>{area}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="therapeutic_area">Therapeutic Area</Label>
+                  <select
+                    id="therapeutic_area"
+                    className="w-full p-2 border rounded-lg bg-background"
+                    value={formData.therapeutic_area}
+                    onChange={(e) => updateFormData('therapeutic_area', e.target.value)}
+                  >
+                    <option value="">Select therapeutic area...</option>
+                    {THERAPEUTIC_AREAS.map((area) => (
+                      <option key={area} value={area}>{area}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nct_id">NCT ID</Label>
+                  <Input
+                    id="nct_id"
+                    value={formData.nct_id}
+                    onChange={(e) => updateFormData('nct_id', e.target.value)}
+                    placeholder="e.g., NCT02142738"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="disease_condition">Disease / Condition</Label>
@@ -270,6 +285,15 @@ export function ProjectCreate() {
                   value={formData.disease_condition}
                   onChange={(e) => updateFormData('disease_condition', e.target.value)}
                   placeholder="e.g., Advanced NSCLC with PD-L1 ≥50%"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="population">Population</Label>
+                <Input
+                  id="population"
+                  value={formData.population}
+                  onChange={(e) => updateFormData('population', e.target.value)}
+                  placeholder="e.g., PD-L1 TPS ≥50%, ECOG PS 0-1, treatment-naïve"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">

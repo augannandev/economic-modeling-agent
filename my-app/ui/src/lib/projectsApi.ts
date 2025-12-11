@@ -8,6 +8,8 @@ export interface Project {
   description: string | null;
   therapeutic_area: string | null;
   disease_condition: string | null;
+  population: string | null;
+  nct_id: string | null;
   intervention: string | null;
   comparator: string | null;
   status: 'draft' | 'active' | 'completed' | 'archived';
@@ -70,6 +72,8 @@ export interface CreateProjectInput {
   description?: string;
   therapeutic_area?: string;
   disease_condition?: string;
+  population?: string;
+  nct_id?: string;
   intervention?: string;
   comparator?: string;
 }
