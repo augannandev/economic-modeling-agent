@@ -242,6 +242,48 @@ survivalRoutes.get('/supabase-projects', async (c) => {
   }
 });
 
+// Create a new Supabase project
+survivalRoutes.post('/supabase-projects', async (c) => {
+  try {
+    if (!isSupabaseConfigured()) {
+      return c.json({ error: 'Supabase not configured' }, 400);
+    }
+
+    const { name, description, intervention, comparator } = await c.req.json();
+
+    if (!name) {
+      return c.json({ error: 'Project name is required' }, 400);
+    }
+
+    const { createProject } = await import('./lib/supabase');
+    const result = await createProject({
+      name,
+      description,
+      intervention,
+      comparator,
+      status: 'active',
+    });
+
+    if (result.error) {
+      return c.json({ error: result.error }, 500);
+    }
+
+    const project = result.data?.[0];
+    return c.json({
+      project: {
+        ...project,
+        hasIPD: false,
+        ipdCount: 0,
+      },
+    });
+  } catch (error) {
+    console.error('Error creating Supabase project:', error);
+    return c.json({
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
 // List analyses
 survivalRoutes.get('/analyses', async (c) => {
   try {

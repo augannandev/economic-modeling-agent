@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,8 @@ import { ExtractionProgress } from '@/components/digitizer/ExtractionProgress';
 import { DataEditor } from '@/components/digitizer/DataEditor';
 import { DataPoint } from '@/components/digitizer/AffineTransformEditor';
 import { extractKMCurve, generatePseudoIPD, IPDGenerationResult, IPDValidationMetrics } from '@/lib/digitizerApi';
+import { survivalApi, type SupabaseProject, createSupabaseProject } from '@/lib/survivalApi';
+import { Plus } from 'lucide-react';
 import { 
   ChevronLeft,
   Upload,
@@ -181,6 +183,51 @@ export function KMDigitizer() {
   // Global settings
   const [granularity, setGranularity] = useState(0.25);
   const [autoSort, setAutoSort] = useState(true);
+  
+  // Supabase project for persistent storage
+  const [supabaseProjects, setSupabaseProjects] = useState<SupabaseProject[]>([]);
+  const [selectedSupabaseProjectId, setSelectedSupabaseProjectId] = useState<string | null>(null);
+  const [supabaseConfigured, setSupabaseConfigured] = useState(false);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  
+  // Load Supabase projects on mount
+  useEffect(() => {
+    loadSupabaseProjects();
+  }, []);
+  
+  const loadSupabaseProjects = async () => {
+    try {
+      const result = await survivalApi.listSupabaseProjects();
+      setSupabaseConfigured(result.supabaseConfigured);
+      setSupabaseProjects(result.projects);
+      // Auto-select first project if available
+      if (result.projects.length > 0 && !selectedSupabaseProjectId) {
+        setSelectedSupabaseProjectId(result.projects[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load Supabase projects:', err);
+    }
+  };
+  
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) return;
+    
+    try {
+      const result = await createSupabaseProject(newProjectName.trim());
+      if (result.project) {
+        setSupabaseProjects(prev => [result.project!, ...prev]);
+        setSelectedSupabaseProjectId(result.project.id);
+        setNewProjectName('');
+        setIsCreatingProject(false);
+      } else if (result.error) {
+        alert(`Failed to create project: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('Failed to create project:', err);
+      alert('Failed to create project');
+    }
+  };
 
   // Image handling
   const handleImageUpload = useCallback((endpointIndex: number, type: 'km_plot' | 'risk_table', file: File) => {
@@ -302,13 +349,15 @@ export function KMDigitizer() {
         console.log(`[KMDigitizer] Extracting ALL curves from endpoint ${i + 1}/${endpoints.length}: ${endpoint.endpointType}`);
         
         // Call extraction API - it will extract ALL curves from the plot
+        // If Supabase project is selected, images will be saved to the database
         const result = await extractKMCurve({
           kmPlotFile: endpoint.kmPlot.file,
           riskTableFile: endpoint.riskTable?.file,
           endpointType: endpoint.endpointType,
           arm: 'all',  // Signal to extract ALL arms
           granularity: granularity,
-          apiProvider: 'anthropic'
+          apiProvider: 'anthropic',
+          projectId: selectedSupabaseProjectId || undefined,
         });
 
         if (result.success) {
@@ -551,10 +600,12 @@ export function KMDigitizer() {
         });
       });
 
-      console.log(`[KMDigitizer] Generating IPD for ${ipdRequests.length} arm(s)${projectId ? ` (project: ${projectId})` : ''}`);
-      
+      // Use Supabase project if selected, otherwise fall back to URL projectId
+      const effectiveProjectId = selectedSupabaseProjectId || projectId || undefined;
+      console.log(`[KMDigitizer] Generating IPD for ${ipdRequests.length} arm(s)${effectiveProjectId ? ` (project: ${effectiveProjectId})` : ''}`);
+
       // Pass projectId to save IPD to database if available
-      const result = await generatePseudoIPD(ipdRequests, projectId || undefined);
+      const result = await generatePseudoIPD(ipdRequests, effectiveProjectId);
 
       if (result.success) {
         console.log('[KMDigitizer] IPD generation successful:', result.files);
@@ -780,6 +831,51 @@ export function KMDigitizer() {
                 </Button>
                   )}
                 </div>
+
+            {/* Supabase Project Selector */}
+            {supabaseConfigured && (
+              <div className="flex items-center gap-3">
+                <Label className="text-sm font-medium">Save to Project:</Label>
+                {isCreatingProject ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newProjectName}
+                      onChange={(e) => setNewProjectName(e.target.value)}
+                      placeholder="Project name..."
+                      className="h-9 px-3 text-sm border rounded-md bg-background w-[180px]"
+                      onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                      autoFocus
+                    />
+                    <Button size="sm" onClick={handleCreateProject} disabled={!newProjectName.trim()}>
+                      Create
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setIsCreatingProject(false); setNewProjectName(''); }}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={selectedSupabaseProjectId || ''}
+                      onChange={(e) => setSelectedSupabaseProjectId(e.target.value || null)}
+                      className="h-9 px-3 text-sm border rounded-md bg-background min-w-[200px]"
+                    >
+                      <option value="">Don't save to database</option>
+                      {supabaseProjects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name} {project.hasIPD ? `(${project.ipdCount} records)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <Button size="sm" variant="outline" onClick={() => setIsCreatingProject(true)} className="gap-1">
+                      <Plus className="h-4 w-4" />
+                      New
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Info */}
             <div className="flex items-center gap-2 text-sm text-muted-foreground">

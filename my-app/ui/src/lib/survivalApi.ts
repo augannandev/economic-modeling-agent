@@ -238,6 +238,7 @@ export const survivalApi = {
   pauseAnalysis,
   resumeAnalysis,
   listSupabaseProjects,
+  createSupabaseProject,
 };
 
 export async function pauseAnalysis(analysisId: string): Promise<void> {
@@ -274,6 +275,22 @@ export async function listSupabaseProjects(): Promise<{
   error?: string;
 }> {
   const response = await fetchWithAuth('/api/v1/survival/supabase-projects');
+  return response.json();
+}
+
+/**
+ * Create a new Supabase project
+ */
+export async function createSupabaseProject(
+  name: string,
+  description?: string,
+  intervention?: string,
+  comparator?: string
+): Promise<{ project?: SupabaseProject; error?: string }> {
+  const response = await fetchWithAuth('/api/v1/survival/supabase-projects', {
+    method: 'POST',
+    body: JSON.stringify({ name, description, intervention, comparator }),
+  });
   return response.json();
 }
 
