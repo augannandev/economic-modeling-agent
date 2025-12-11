@@ -118,6 +118,7 @@ export interface ExtractKMCurveOptions {
   arm?: string;
   granularity?: number;
   apiProvider?: 'anthropic' | 'openai';
+  projectId?: string;      // Optional: save extraction to Supabase
 }
 
 /**
@@ -177,6 +178,8 @@ export async function extractKMCurve(
         arm: options.arm,
         granularity: options.granularity || 0.25,
         apiProvider: options.apiProvider || 'anthropic',
+        projectId: options.projectId,
+        imageFilename: options.kmPlotFile.name,
       }),
     });
 

@@ -1421,13 +1421,22 @@ digitizerRoutes.use('*', authMiddleware);
 digitizerRoutes.post('/extract', async (c) => {
   try {
     const body = await c.req.json();
-    const { imageBase64, riskTableImageBase64, endpointType, arm, granularity, apiProvider } = body;
+    const { 
+      imageBase64, 
+      riskTableImageBase64, 
+      endpointType, 
+      arm, 
+      granularity, 
+      apiProvider,
+      projectId,       // Optional: save to Supabase for this project
+      imageFilename    // Optional: original filename
+    } = body;
 
     if (!imageBase64) {
       return c.json({ error: 'Image data is required' }, 400);
     }
 
-    console.log(`[Digitizer API] Extraction request for ${endpointType} - ${arm}, granularity: ${granularity || 0.25}`);
+    console.log(`[Digitizer API] Extraction request for ${endpointType} - ${arm}, granularity: ${granularity || 0.25}, projectId: ${projectId || 'none'}`);
 
     const result = await extractKMCurve(
       imageBase64,
@@ -1435,7 +1444,9 @@ digitizerRoutes.post('/extract', async (c) => {
       endpointType,
       arm,
       granularity,
-      apiProvider
+      apiProvider,
+      projectId,
+      imageFilename
     );
 
     if (!result.success) {

@@ -1,7 +1,8 @@
 import { getPythonServiceUrl } from '../lib/env';
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { saveIPD, isSupabaseConfigured } from '../lib/supabase';
+import { createHash } from 'crypto';
+import { saveIPD, isSupabaseConfigured, saveProjectKMCurve } from '../lib/supabase';
 
 const PYTHON_SERVICE_URL = getPythonServiceUrl();
 
@@ -96,6 +97,15 @@ export interface IPDGenerationResult {
 /**
  * Extract KM curve data from an uploaded image
  * This calls the Python service which uses LLM vision + OpenCV extraction
+ * 
+ * @param imageBase64 - Base64 encoded image
+ * @param riskTableImageBase64 - Optional risk table image
+ * @param endpointType - 'OS' or 'PFS'
+ * @param arm - Treatment arm name
+ * @param granularity - Time granularity for resampling
+ * @param apiProvider - LLM provider ('anthropic' or 'openai')
+ * @param projectId - Optional: Save extraction to Supabase for this project
+ * @param imageFilename - Optional: Original filename for storage
  */
 export async function extractKMCurve(
   imageBase64: string,
@@ -103,7 +113,9 @@ export async function extractKMCurve(
   endpointType?: string,
   arm?: string,
   granularity?: number,
-  apiProvider?: string
+  apiProvider?: string,
+  projectId?: string,
+  imageFilename?: string
 ): Promise<ExtractionResult> {
   try {
     console.log(`[Digitizer] Calling Python extraction service at ${PYTHON_SERVICE_URL}`);
@@ -190,6 +202,37 @@ export async function extractKMCurve(
 
     console.log(`[Digitizer] Extraction successful: ${curves.length} curves, ${result.points?.length || 0} points (first curve)`);
     console.log(`[Digitizer] Curves risk tables:`, curves.map(c => ({ name: c.name, riskTableCount: c.riskTable?.length || 0 })));
+    
+    // Save to Supabase if projectId is provided
+    if (projectId && isSupabaseConfigured()) {
+      try {
+        // Create image hash for deduplication
+        const imageHash = createHash('sha256').update(imageBase64).digest('hex');
+        
+        // Save each curve separately
+        for (const curve of curves) {
+          await saveProjectKMCurve(projectId, {
+            image_hash: imageHash,
+            image_data: imageBase64,
+            image_filename: imageFilename,
+            endpoint_type: endpointType || 'OS',
+            arm: curve.name,
+            points: curve.points.map(p => ({ time: p.time, survival: p.survival })),
+            risk_table: curve.riskTable?.map(r => ({ time: r.time, atRisk: r.atRisk, events: r.events })),
+            axis_ranges: result.axisRanges,
+            metadata: {
+              curveId: curve.id,
+              curveColor: curve.color,
+              ...result.metadata,
+            },
+          });
+        }
+        console.log(`[Digitizer] Saved ${curves.length} curves to Supabase for project ${projectId}`);
+      } catch (err) {
+        console.warn('[Digitizer] Failed to save to Supabase:', err);
+        // Don't fail the extraction if Supabase save fails
+      }
+    }
     
     return {
       success: true,

@@ -151,7 +151,10 @@ export interface Analysis {
 
 export interface KMExtractionCache {
   id?: string;
+  project_id?: string;          // Link to project
   image_hash: string;
+  image_data?: string;          // Base64 encoded image
+  image_filename?: string;      // Original filename
   endpoint_type?: string;
   arm?: string;
   points: { time: number; survival: number }[];
@@ -159,6 +162,33 @@ export interface KMExtractionCache {
   axis_ranges?: { xMin: number; xMax: number; yMin: number; yMax: number };
   metadata?: Record<string, unknown>;
   created_at?: string;
+}
+
+/**
+ * Save KM curve image and extraction data to a project
+ */
+export async function saveProjectKMCurve(
+  projectId: string,
+  extraction: Omit<KMExtractionCache, 'id' | 'created_at' | 'project_id'>
+): Promise<SupabaseResponse<KMExtractionCache[]>> {
+  return supabaseRequest<KMExtractionCache[]>('km_extraction_cache', {
+    method: 'POST',
+    body: {
+      ...extraction,
+      project_id: projectId,
+    },
+  });
+}
+
+/**
+ * Get all KM curves for a project
+ */
+export async function getProjectKMCurves(projectId: string): Promise<SupabaseResponse<KMExtractionCache[]>> {
+  return supabaseRequest<KMExtractionCache[]>('km_extraction_cache', {
+    method: 'GET',
+    filters: { project_id: `eq.${projectId}` },
+    order: 'created_at.asc',
+  });
 }
 
 // ============================================
