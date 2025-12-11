@@ -1068,10 +1068,14 @@ projectRoutes.get('/', async (c) => {
     const user = c.get('user');
     const db = await getDatabase(getDatabaseUrl()!);
 
+    console.log(`[Projects List] User ID: ${user.id}`);
+
+    // Temporarily show all projects for debugging (remove user filter)
     const results = await db.select()
       .from(projects)
-      .where(eq(projects.user_id, user.id))
       .orderBy(desc(projects.created_at));
+
+    console.log(`[Projects List] Found ${results.length} projects`);
 
     return c.json({ projects: results });
   } catch (error) {
