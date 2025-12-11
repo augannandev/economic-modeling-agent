@@ -103,7 +103,9 @@ export interface Project {
   name: string;
   description?: string;
   therapeutic_area?: string;
-  disease_condition?: string;
+  disease?: string;
+  population?: string;
+  nct_id?: string;
   intervention?: string;
   comparator?: string;
   status: string;

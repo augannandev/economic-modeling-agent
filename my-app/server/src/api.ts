@@ -249,7 +249,16 @@ survivalRoutes.post('/supabase-projects', async (c) => {
       return c.json({ error: 'Supabase not configured' }, 400);
     }
 
-    const { name, description, intervention, comparator } = await c.req.json();
+    const { 
+      name, 
+      description, 
+      therapeutic_area,
+      disease,
+      population,
+      nct_id,
+      intervention, 
+      comparator 
+    } = await c.req.json();
 
     if (!name) {
       return c.json({ error: 'Project name is required' }, 400);
@@ -259,6 +268,10 @@ survivalRoutes.post('/supabase-projects', async (c) => {
     const result = await createProject({
       name,
       description,
+      therapeutic_area,
+      disease,
+      population,
+      nct_id,
       intervention,
       comparator,
       status: 'active',

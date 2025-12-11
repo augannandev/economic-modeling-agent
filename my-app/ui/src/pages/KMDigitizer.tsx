@@ -9,8 +9,8 @@ import { ExtractionProgress } from '@/components/digitizer/ExtractionProgress';
 import { DataEditor } from '@/components/digitizer/DataEditor';
 import { DataPoint } from '@/components/digitizer/AffineTransformEditor';
 import { extractKMCurve, generatePseudoIPD, IPDGenerationResult, IPDValidationMetrics } from '@/lib/digitizerApi';
-import { survivalApi, type SupabaseProject, createSupabaseProject } from '@/lib/survivalApi';
-import { Plus } from 'lucide-react';
+import { survivalApi, type SupabaseProject, createSupabaseProject, type CreateProjectOptions } from '@/lib/survivalApi';
+import { Plus, Database } from 'lucide-react';
 import { 
   ChevronLeft,
   Upload,
@@ -189,7 +189,16 @@ export function KMDigitizer() {
   const [selectedSupabaseProjectId, setSelectedSupabaseProjectId] = useState<string | null>(null);
   const [supabaseConfigured, setSupabaseConfigured] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
+  const [showFullProjectForm, setShowFullProjectForm] = useState(false);
+  const [newProject, setNewProject] = useState<CreateProjectOptions>({
+    name: '',
+    therapeuticArea: '',
+    disease: '',
+    population: '',
+    nctId: '',
+    intervention: '',
+    comparator: '',
+  });
   
   // Load Supabase projects on mount
   useEffect(() => {
@@ -211,15 +220,24 @@ export function KMDigitizer() {
   };
   
   const handleCreateProject = async () => {
-    if (!newProjectName.trim()) return;
+    if (!newProject.name.trim()) return;
     
     try {
-      const result = await createSupabaseProject(newProjectName.trim());
+      const result = await createSupabaseProject(newProject);
       if (result.project) {
         setSupabaseProjects(prev => [result.project!, ...prev]);
         setSelectedSupabaseProjectId(result.project.id);
-        setNewProjectName('');
+        setNewProject({
+          name: '',
+          therapeuticArea: '',
+          disease: '',
+          population: '',
+          nctId: '',
+          intervention: '',
+          comparator: '',
+        });
         setIsCreatingProject(false);
+        setShowFullProjectForm(false);
       } else if (result.error) {
         alert(`Failed to create project: ${result.error}`);
       }
@@ -227,6 +245,20 @@ export function KMDigitizer() {
       console.error('Failed to create project:', err);
       alert('Failed to create project');
     }
+  };
+  
+  const resetProjectForm = () => {
+    setIsCreatingProject(false);
+    setShowFullProjectForm(false);
+    setNewProject({
+      name: '',
+      therapeuticArea: '',
+      disease: '',
+      population: '',
+      nctId: '',
+      intervention: '',
+      comparator: '',
+    });
   };
 
   // Image handling
@@ -835,26 +867,9 @@ export function KMDigitizer() {
             {/* Supabase Project Selector */}
             {supabaseConfigured && (
               <div className="flex items-center gap-3">
+                <Database className="h-4 w-4 text-muted-foreground" />
                 <Label className="text-sm font-medium">Save to Project:</Label>
-                {isCreatingProject ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={newProjectName}
-                      onChange={(e) => setNewProjectName(e.target.value)}
-                      placeholder="Project name..."
-                      className="h-9 px-3 text-sm border rounded-md bg-background w-[180px]"
-                      onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-                      autoFocus
-                    />
-                    <Button size="sm" onClick={handleCreateProject} disabled={!newProjectName.trim()}>
-                      Create
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setIsCreatingProject(false); setNewProjectName(''); }}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ) : (
+                {!isCreatingProject ? (
                   <>
                     <select
                       value={selectedSupabaseProjectId || ''}
@@ -870,10 +885,121 @@ export function KMDigitizer() {
                     </select>
                     <Button size="sm" variant="outline" onClick={() => setIsCreatingProject(true)} className="gap-1">
                       <Plus className="h-4 w-4" />
-                      New
+                      New Project
                     </Button>
                   </>
+                ) : !showFullProjectForm ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newProject.name}
+                      onChange={(e) => setNewProject(p => ({ ...p, name: e.target.value }))}
+                      placeholder="Project name..."
+                      className="h-9 px-3 text-sm border rounded-md bg-background w-[200px]"
+                      onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                      autoFocus
+                    />
+                    <Button size="sm" onClick={handleCreateProject} disabled={!newProject.name.trim()}>
+                      Create
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setShowFullProjectForm(true)}>
+                      More Details
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={resetProjectForm}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={resetProjectForm}>
+                    <X className="h-4 w-4 mr-1" />
+                    Cancel
+                  </Button>
                 )}
+              </div>
+            )}
+            
+            {/* Full Project Creation Form */}
+            {isCreatingProject && showFullProjectForm && (
+              <div className="w-full pt-4 border-t mt-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Project Name *</Label>
+                    <input
+                      type="text"
+                      value={newProject.name}
+                      onChange={(e) => setNewProject(p => ({ ...p, name: e.target.value }))}
+                      placeholder="e.g., KEYNOTE-024 OS Analysis"
+                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">NCT ID</Label>
+                    <input
+                      type="text"
+                      value={newProject.nctId}
+                      onChange={(e) => setNewProject(p => ({ ...p, nctId: e.target.value }))}
+                      placeholder="e.g., NCT02142738"
+                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Therapeutic Area</Label>
+                    <input
+                      type="text"
+                      value={newProject.therapeuticArea}
+                      onChange={(e) => setNewProject(p => ({ ...p, therapeuticArea: e.target.value }))}
+                      placeholder="e.g., Oncology"
+                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Disease</Label>
+                    <input
+                      type="text"
+                      value={newProject.disease}
+                      onChange={(e) => setNewProject(p => ({ ...p, disease: e.target.value }))}
+                      placeholder="e.g., Advanced NSCLC"
+                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Label className="text-xs text-muted-foreground">Population</Label>
+                    <input
+                      type="text"
+                      value={newProject.population}
+                      onChange={(e) => setNewProject(p => ({ ...p, population: e.target.value }))}
+                      placeholder="e.g., PD-L1 TPS ≥50%, ECOG PS 0-1, treatment-naïve"
+                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Intervention</Label>
+                    <input
+                      type="text"
+                      value={newProject.intervention}
+                      onChange={(e) => setNewProject(p => ({ ...p, intervention: e.target.value }))}
+                      placeholder="e.g., Pembrolizumab 200mg Q3W"
+                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Comparator</Label>
+                    <input
+                      type="text"
+                      value={newProject.comparator}
+                      onChange={(e) => setNewProject(p => ({ ...p, comparator: e.target.value }))}
+                      placeholder="e.g., Platinum-based Chemotherapy"
+                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4">
+                  <Button variant="outline" onClick={resetProjectForm}>Cancel</Button>
+                  <Button onClick={handleCreateProject} disabled={!newProject.name.trim()}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Create Project
+                  </Button>
+                </div>
               </div>
             )}
 

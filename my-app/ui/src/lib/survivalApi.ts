@@ -278,18 +278,43 @@ export async function listSupabaseProjects(): Promise<{
   return response.json();
 }
 
+export interface CreateProjectOptions {
+  name: string;
+  description?: string;
+  therapeuticArea?: string;
+  disease?: string;
+  population?: string;
+  nctId?: string;
+  intervention?: string;
+  comparator?: string;
+}
+
 /**
  * Create a new Supabase project
  */
 export async function createSupabaseProject(
-  name: string,
+  options: CreateProjectOptions | string,
   description?: string,
   intervention?: string,
   comparator?: string
 ): Promise<{ project?: SupabaseProject; error?: string }> {
+  // Support both old signature (name as string) and new signature (options object)
+  const body = typeof options === 'string' 
+    ? { name: options, description, intervention, comparator }
+    : {
+        name: options.name,
+        description: options.description,
+        therapeutic_area: options.therapeuticArea,
+        disease: options.disease,
+        population: options.population,
+        nct_id: options.nctId,
+        intervention: options.intervention,
+        comparator: options.comparator,
+      };
+  
   const response = await fetchWithAuth('/api/v1/survival/supabase-projects', {
     method: 'POST',
-    body: JSON.stringify({ name, description, intervention, comparator }),
+    body: JSON.stringify(body),
   });
   return response.json();
 }
