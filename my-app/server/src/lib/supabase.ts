@@ -14,7 +14,7 @@ interface SupabaseResponse<T> {
 /**
  * Make a request to the Supabase REST API
  */
-async function supabaseRequest<T>(
+export async function supabaseRequest<T>(
   table: string,
   options: {
     method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';

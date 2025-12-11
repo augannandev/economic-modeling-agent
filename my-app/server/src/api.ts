@@ -12,6 +12,7 @@ import { arms } from './schema/arms';
 import { endpoints } from './schema/endpoints';
 import { dataSources } from './schema/data-sources';
 import { runSurvivalAnalysisWorkflow } from './agents/survival-agent';
+import { isSupabaseConfigured, supabaseRequest } from './lib/supabase';
 import { eq, desc, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
@@ -175,6 +176,68 @@ survivalRoutes.post('/analyze', async (c) => {
     return c.json({
       error: 'Failed to start analysis',
       details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// List Supabase projects (for project-specific IPD)
+survivalRoutes.get('/supabase-projects', async (c) => {
+  try {
+    if (!isSupabaseConfigured()) {
+      return c.json({ 
+        projects: [], 
+        supabaseConfigured: false,
+        message: 'Supabase not configured. Using demo data.' 
+      });
+    }
+
+    // Fetch projects from Supabase
+    const result = await supabaseRequest<Array<{
+      id: string;
+      name: string;
+      description?: string;
+      created_at: string;
+    }>>('projects', {
+      method: 'GET',
+      order: 'created_at.desc',
+    });
+
+    if (result.error) {
+      console.warn('[API] Supabase projects fetch error:', result.error);
+      return c.json({ 
+        projects: [], 
+        supabaseConfigured: true,
+        error: result.error 
+      });
+    }
+
+    // Also check which projects have IPD data
+    const projectsWithIPD = await Promise.all(
+      (result.data || []).map(async (project) => {
+        const ipdResult = await supabaseRequest<Array<{ id: string }>>('ipd_data', {
+          method: 'GET',
+          filters: { project_id: `eq.${project.id}` },
+          select: 'id',
+        });
+        
+        return {
+          ...project,
+          hasIPD: (ipdResult.data?.length || 0) > 0,
+          ipdCount: ipdResult.data?.length || 0,
+        };
+      })
+    );
+
+    return c.json({ 
+      projects: projectsWithIPD,
+      supabaseConfigured: true,
+    });
+  } catch (error) {
+    console.error('Error fetching Supabase projects:', error);
+    return c.json({
+      projects: [],
+      supabaseConfigured: true,
+      error: error instanceof Error ? error.message : 'Unknown error',
     }, 500);
   }
 });

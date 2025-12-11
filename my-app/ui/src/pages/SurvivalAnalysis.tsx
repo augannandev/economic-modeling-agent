@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { survivalApi, type Analysis, type AnalysisStatus } from '@/lib/survivalApi';
+import { survivalApi, type Analysis, type AnalysisStatus, type SupabaseProject } from '@/lib/survivalApi';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -56,10 +56,34 @@ export function SurvivalAnalysis() {
   const [endpointType, setEndpointType] = useState<'OS' | 'PFS'>('OS');
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  
+  // Project selection state
+  const [supabaseProjects, setSupabaseProjects] = useState<SupabaseProject[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [supabaseConfigured, setSupabaseConfigured] = useState(false);
 
   useEffect(() => {
     loadAnalyses();
+    loadSupabaseProjects();
   }, []);
+  
+  const loadSupabaseProjects = async () => {
+    try {
+      const result = await survivalApi.listSupabaseProjects();
+      setSupabaseConfigured(result.supabaseConfigured);
+      setSupabaseProjects(result.projects);
+      
+      // Auto-select first project with IPD
+      if (result.projects.length > 0) {
+        const projectWithIPD = result.projects.find(p => p.hasIPD);
+        if (projectWithIPD) {
+          setSelectedProjectId(projectWithIPD.id);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load Supabase projects:', err);
+    }
+  };
 
   useEffect(() => {
     if (!selectedAnalysis) return;
@@ -116,7 +140,11 @@ export function SurvivalAnalysis() {
     setLoading(true);
     setError(null);
     try {
-      const result = await survivalApi.startAnalysis(endpointType);
+      // Pass selectedProjectId to use project-specific IPD from Supabase
+      const result = await survivalApi.startAnalysis(
+        endpointType, 
+        selectedProjectId || undefined
+      );
       await loadAnalyses();
       const analysisData = await survivalApi.getAnalysis(result.analysis_id);
       setSelectedAnalysis(analysisData.analysis);
@@ -221,6 +249,26 @@ export function SurvivalAnalysis() {
               >
                 <MessageSquare className="h-4 w-4" />
               </Button>
+
+              {/* Project Selector */}
+              {supabaseConfigured && supabaseProjects.length > 0 && (
+                <select
+                  value={selectedProjectId || ''}
+                  onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                  className="h-9 px-3 py-1 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Demo Data</option>
+                  {supabaseProjects.map((project) => (
+                    <option 
+                      key={project.id} 
+                      value={project.id}
+                      disabled={!project.hasIPD}
+                    >
+                      {project.name} {project.hasIPD ? `(${project.ipdCount} records)` : '(no IPD)'}
+                    </option>
+                  ))}
+                </select>
+              )}
 
               <Button onClick={handleStartAnalysis} disabled={loading}>
                 {loading ? (

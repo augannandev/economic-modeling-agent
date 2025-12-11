@@ -127,11 +127,16 @@ export interface TokenUsage {
 
 /**
  * Start a new survival analysis workflow
+ * @param endpointType - 'OS' or 'PFS'
+ * @param projectId - Optional Supabase project ID to use project-specific IPD
  */
-export async function startAnalysis(endpointType: 'OS' | 'PFS' = 'OS'): Promise<{ analysis_id: string; status: string; message: string }> {
+export async function startAnalysis(
+  endpointType: 'OS' | 'PFS' = 'OS',
+  projectId?: string
+): Promise<{ analysis_id: string; status: string; message: string; projectId?: string }> {
   const response = await fetchWithAuth('/api/v1/survival/analyze', {
     method: 'POST',
-    body: JSON.stringify({ endpointType }),
+    body: JSON.stringify({ endpointType, projectId }),
   });
   return response.json();
 }
@@ -232,6 +237,7 @@ export const survivalApi = {
   deleteAnalysis,
   pauseAnalysis,
   resumeAnalysis,
+  listSupabaseProjects,
 };
 
 export async function pauseAnalysis(analysisId: string): Promise<void> {
@@ -246,5 +252,28 @@ export async function resumeAnalysis(analysisId: string): Promise<void> {
     method: 'POST',
   });
   if (!response.ok) throw new Error('Failed to resume analysis');
+}
+
+// Supabase project interface
+export interface SupabaseProject {
+  id: string;
+  name: string;
+  description?: string;
+  created_at: string;
+  hasIPD: boolean;
+  ipdCount: number;
+}
+
+/**
+ * List Supabase projects (for project-specific IPD)
+ */
+export async function listSupabaseProjects(): Promise<{
+  projects: SupabaseProject[];
+  supabaseConfigured: boolean;
+  message?: string;
+  error?: string;
+}> {
+  const response = await fetchWithAuth('/api/v1/survival/supabase-projects');
+  return response.json();
 }
 
