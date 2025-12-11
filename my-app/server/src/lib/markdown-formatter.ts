@@ -185,6 +185,64 @@ function emphasizeKeyTerms(text: string): string {
 }
 
 /**
+ * Fix standalone bold text that should be headings
+ * e.g., "**Section Title**\n\n" at line start should become "## Section Title"
+ */
+function fixBoldAsHeadings(text: string): string {
+  // Pattern: Line starts with **text** followed by newlines (indicating it's a standalone "heading")
+  // Convert to proper heading if it looks like a section title
+  const lines = text.split('\n');
+  const result: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const nextLine = lines[i + 1]?.trim() || '';
+    
+    // Check if this is a standalone bold line that looks like a heading
+    const boldMatch = line.match(/^\*\*([^*]+)\*\*$/);
+    
+    if (boldMatch && (nextLine === '' || nextLine.startsWith('-') || nextLine.startsWith('*') || /^[A-Z]/.test(nextLine))) {
+      const headingText = boldMatch[1].trim();
+      
+      // Skip if it's a short phrase or looks like emphasis rather than heading
+      if (headingText.length > 3 && !headingText.includes(':') && headingText.split(' ').length <= 8) {
+        // Determine heading level based on content
+        let level = '###'; // Default to H3
+        
+        if (headingText.match(/^(Executive|Summary|Overview|Conclusion|Introduction|References)/i)) {
+          level = '##';
+        } else if (headingText.match(/^(Note|Warning|Caution|Important)/i)) {
+          // Keep as bold, not heading
+          result.push(lines[i]);
+          continue;
+        }
+        
+        result.push(`${level} ${headingText}`);
+        continue;
+      }
+    }
+    
+    result.push(lines[i]);
+  }
+  
+  return result.join('\n');
+}
+
+/**
+ * Ensure citations are properly formatted with brackets
+ */
+function formatCitations(text: string): string {
+  // Fix citations that might be malformed
+  // e.g., "[1]" should stay as is, "1]" should become "[1]"
+  text = text.replace(/(?<!\[)(\d+)\]/g, '[$1]');
+  
+  // Ensure space before citations
+  text = text.replace(/(\S)\[(\d+)\]/g, '$1 [$2]');
+  
+  return text;
+}
+
+/**
  * Main formatter function - apply all fixes
  */
 export function formatMarkdown(text: string): string {
@@ -195,9 +253,11 @@ export function formatMarkdown(text: string): string {
   // Apply fixes in order
   formatted = fixEscapedSyntax(formatted);
   formatted = fixBulletPoints(formatted);
+  formatted = fixBoldAsHeadings(formatted);  // New: Fix **Header** patterns
   formatted = normalizeHeadings(formatted);
   formatted = fixTables(formatted);
   formatted = formatNumbers(formatted);
+  formatted = formatCitations(formatted);    // New: Format citations
   formatted = emphasizeKeyTerms(formatted);
   formatted = cleanWhitespace(formatted);
   

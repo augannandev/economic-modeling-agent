@@ -234,41 +234,109 @@ function buildAllComparisonTables(models: ModelAssessment[]): string {
 }
 
 /**
- * Generate references section from RAG sources
+ * Generate references section from RAG sources with proper academic formatting
  */
 function generateReferencesSection(sources: RAGSource[]): string {
   if (sources.length === 0) return '';
   
-  let refs = '\n\n## References\n\n';
+  let refs = '\n\n---\n\n## References\n\n';
+  refs += '*The following sources were consulted during this analysis:*\n\n';
+  
   for (const source of sources) {
-    refs += `${source.id}. **[${source.shortName}]** ${source.fullName}\n`;
+    // Format with citation number, italicized title, and description
+    const url = getSourceUrl(source.source);
+    if (url) {
+      refs += `**[${source.id}]** *${source.fullName}* — [View Document](${url})\n\n`;
+    } else {
+      refs += `**[${source.id}]** *${source.fullName}*\n\n`;
+    }
   }
+  
+  refs += '\n*Note: Citations marked with [n] correspond to the reference numbers above.*\n';
   return refs;
 }
 
 /**
- * Generate embedded plots section for base case models
+ * Get URL for known sources
  */
-function generatePlotsSection(baseCaseModels: ModelAssessment[]): string {
+function getSourceUrl(source: string): string | null {
+  if (source.includes('TSD14')) return 'https://www.sheffield.ac.uk/nice-dsu/tsds/survival-analysis';
+  if (source.includes('TSD16')) return 'https://www.sheffield.ac.uk/nice-dsu/tsds/treatment-switching';
+  if (source.includes('TSD19')) return 'https://www.sheffield.ac.uk/nice-dsu/tsds/partitioned-survival';
+  if (source.includes('TSD21')) return 'https://www.sheffield.ac.uk/nice-dsu/tsds/flexible-survival';
+  if (source.includes('KEYNOTE') || source.includes('NEJM')) return 'https://www.nejm.org/doi/full/10.1056/NEJMoa1606774';
+  return null;
+}
+
+/**
+ * Model assessment data extended with diagnostic plots
+ */
+interface ExtendedModelAssessment extends ModelAssessment {
+  diagnosticPlots?: {
+    log_cumulative_hazard?: string;  // base64
+    cumulative_hazard?: string;       // base64
+  };
+}
+
+/**
+ * Generate embedded plots section for base case models
+ * Includes survival extrapolation plots and diagnostic plots
+ */
+function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots?: { 
+  log_cumulative_hazard?: string; 
+  cumulative_hazard?: string;
+  schoenfeld?: string;
+}): string {
+  let plotsSection = '\n\n---\n\n## Model Diagnostic and Extrapolation Plots\n\n';
+  plotsSection += '*Visual assessment of model fit and extrapolation behavior*\n\n';
+  
+  // Add diagnostic plots first (if available)
+  if (diagnosticPlots) {
+    if (diagnosticPlots.log_cumulative_hazard) {
+      plotsSection += '### Log-Cumulative Hazard Plot\n\n';
+      plotsSection += '*Used to assess proportional hazards assumption and guide distribution selection. ';
+      plotsSection += 'Parallel lines suggest PH holds; diverging lines indicate time-varying hazard ratios.*\n\n';
+      plotsSection += `![Log-Cumulative Hazard](data:image/png;base64,${diagnosticPlots.log_cumulative_hazard})\n\n`;
+    }
+    
+    if (diagnosticPlots.cumulative_hazard) {
+      plotsSection += '### Cumulative Hazard Plot\n\n';
+      plotsSection += '*Cumulative hazard over time for each arm. Linear shape suggests exponential model; ';
+      plotsSection += 'curvature indicates Weibull or other flexible distributions may be more appropriate.*\n\n';
+      plotsSection += `![Cumulative Hazard](data:image/png;base64,${diagnosticPlots.cumulative_hazard})\n\n`;
+    }
+    
+    if (diagnosticPlots.schoenfeld) {
+      plotsSection += '### Schoenfeld Residuals Plot\n\n';
+      plotsSection += '*Assessment of proportional hazards assumption over time.*\n\n';
+      plotsSection += `![Schoenfeld Residuals](data:image/png;base64,${diagnosticPlots.schoenfeld})\n\n`;
+    }
+  }
+  
+  // Add base case model plots
   const modelsWithPlots = baseCaseModels.filter(m => m.plots?.short_term_base64 || m.plots?.long_term_base64);
   
-  if (modelsWithPlots.length === 0) return '';
-  
-  let plotsSection = '\n\n## Base Case Model Plots\n\n';
-  
-  for (const model of modelsWithPlots) {
-    const armLabel = model.arm === 'chemo' ? 'Chemotherapy' : 'Pembrolizumab';
-    plotsSection += `### ${armLabel} - ${model.distribution || model.approach}\n\n`;
+  if (modelsWithPlots.length > 0) {
+    plotsSection += '### Base Case Model Extrapolations\n\n';
     
-    if (model.plots?.short_term_base64) {
-      plotsSection += `**Short-term Fit (Observed Period)**\n\n`;
-      plotsSection += `![${armLabel} Short-term Fit](data:image/png;base64,${model.plots.short_term_base64})\n\n`;
+    for (const model of modelsWithPlots) {
+      const armLabel = model.arm === 'chemo' ? 'Chemotherapy' : 'Pembrolizumab';
+      plotsSection += `#### ${armLabel} — ${model.distribution || model.approach}\n\n`;
+      
+      if (model.plots?.short_term_base64) {
+        plotsSection += `**Short-term Fit (Observed Period)**\n\n`;
+        plotsSection += `![${armLabel} Short-term Fit](data:image/png;base64,${model.plots.short_term_base64})\n\n`;
+      }
+      
+      if (model.plots?.long_term_base64) {
+        plotsSection += `**Long-term Extrapolation**\n\n`;
+        plotsSection += `![${armLabel} Long-term Extrapolation](data:image/png;base64,${model.plots.long_term_base64})\n\n`;
+      }
     }
-    
-    if (model.plots?.long_term_base64) {
-      plotsSection += `**Long-term Extrapolation**\n\n`;
-      plotsSection += `![${armLabel} Long-term Extrapolation](data:image/png;base64,${model.plots.long_term_base64})\n\n`;
-    }
+  }
+  
+  if (!diagnosticPlots && modelsWithPlots.length === 0) {
+    return ''; // No plots to show
   }
   
   return plotsSection;
@@ -402,6 +470,11 @@ export async function synthesizeCrossModel(
     rationale: string;
     crossing_detected?: boolean;
     crossing_time?: number | null;
+    diagnostic_plots?: {
+      log_cumulative_hazard?: string;
+      cumulative_hazard?: string;
+      schoenfeld?: string;
+    };
   },
   cutpointResults?: {
     chemo: ChowTestResult;
@@ -545,12 +618,28 @@ Include a formatted markdown table with:
 ---
 
 FORMATTING REQUIREMENTS:
-- Use proper markdown headings (##, ###)
-- Use bullet points for lists
-- Bold key terms and model names
+- Use proper markdown headings: ## for main sections, ### for subsections, #### for sub-subsections
+- Do NOT use plain **Header** format - always use proper heading syntax (## Header)
+- Use bullet points (- ) for lists, not asterisks
+- Bold **key terms** and model names within sentences
+- Italicize *citations* and *document titles*
 - Include the summary table at the end
-- Cite TSD14/TSD21 where relevant (from RAG context)
-- No raw asterisks - format properly`;
+- CITE ALL SOURCES: Use [n] format to cite RAG sources (e.g., "as recommended in TSD14 [1]")
+- Every major claim should have a citation from the RAG context
+- For benchmark comparisons, cite the source of the benchmark data
+- Ensure all tables have proper header separators (|---|)
+- Use > blockquotes for important recommendations or warnings
+
+CITATION EXAMPLES:
+- "The NICE DSU recommends visual assessment of model fit [1]"
+- "According to TSD21, flexible models should be considered when... [2]"
+- "External benchmarks suggest 5-year OS of approximately X% [3]"
+
+OUTPUT QUALITY:
+- Professional, regulatory-ready prose
+- No placeholder text or TODO markers
+- Complete sentences and paragraphs
+- Clear logical flow between sections`;
 
   const messages = [new HumanMessage({ content: prompt })];
   const response = await llm.invoke(messages);
@@ -584,8 +673,8 @@ FORMATTING REQUIREMENTS:
     }
   }
 
-  // Append base case model plots (short-term and long-term)
-  const plotsSection = generatePlotsSection(baseCaseModels);
+  // Append diagnostic plots and base case model plots
+  const plotsSection = generatePlotsSection(baseCaseModels, phTestResults?.diagnostic_plots);
   if (plotsSection) {
     content += plotsSection;
   }
