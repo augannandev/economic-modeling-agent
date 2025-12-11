@@ -9,8 +9,7 @@ import { ExtractionProgress } from '@/components/digitizer/ExtractionProgress';
 import { DataEditor } from '@/components/digitizer/DataEditor';
 import { DataPoint } from '@/components/digitizer/AffineTransformEditor';
 import { extractKMCurve, generatePseudoIPD, IPDGenerationResult, IPDValidationMetrics } from '@/lib/digitizerApi';
-import { survivalApi, type SupabaseProject, createSupabaseProject, type CreateProjectOptions } from '@/lib/survivalApi';
-import { Plus, Database } from 'lucide-react';
+import { projectsApi, type Project } from '@/lib/projectsApi';
 import { 
   ChevronLeft,
   Upload,
@@ -25,8 +24,9 @@ import {
   RefreshCw,
   ArrowUpDown,
   Info,
-  X,
-  Download
+  Download,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -184,79 +184,36 @@ export function KMDigitizer() {
   const [granularity, setGranularity] = useState(0.25);
   const [autoSort, setAutoSort] = useState(true);
   
-  // Supabase project for persistent storage
-  const [supabaseProjects, setSupabaseProjects] = useState<SupabaseProject[]>([]);
-  const [selectedSupabaseProjectId, setSelectedSupabaseProjectId] = useState<string | null>(null);
-  const [supabaseConfigured, setSupabaseConfigured] = useState(false);
-  const [isCreatingProject, setIsCreatingProject] = useState(false);
-  const [newProject, setNewProject] = useState<CreateProjectOptions>({
-    name: '',
-    therapeuticArea: '',
-    disease: '',
-    population: '',
-    nctId: '',
-    intervention: '',
-    comparator: '',
-  });
+  // Project from URL
+  const [project, setProject] = useState<Project | null>(null);
+  const [projectLoading, setProjectLoading] = useState(true);
+  const [projectError, setProjectError] = useState<string | null>(null);
   
-  // Load Supabase projects on mount
+  // Load project from URL on mount
   useEffect(() => {
-    loadSupabaseProjects();
-  }, []);
-  
-  const loadSupabaseProjects = async () => {
-    try {
-      const result = await survivalApi.listSupabaseProjects();
-      setSupabaseConfigured(result.supabaseConfigured);
-      setSupabaseProjects(result.projects);
-      // Auto-select first project if available
-      if (result.projects.length > 0 && !selectedSupabaseProjectId) {
-        setSelectedSupabaseProjectId(result.projects[0].id);
+    const loadProject = async () => {
+      if (!projectId) {
+        setProjectLoading(false);
+        setProjectError('No project selected. Please access this page from a project.');
+        return;
       }
-    } catch (err) {
-      console.error('Failed to load Supabase projects:', err);
-    }
-  };
-  
-  const handleCreateProject = async () => {
-    if (!newProject.name.trim()) return;
+      
+      try {
+        setProjectLoading(true);
+        const result = await projectsApi.getProject(projectId);
+        setProject(result.project);
+        setProjectError(null);
+      } catch (err) {
+        console.error('Failed to load project:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load project';
+        setProjectError(errorMessage);
+      } finally {
+        setProjectLoading(false);
+      }
+    };
     
-    try {
-      const result = await createSupabaseProject(newProject);
-      if (result.project) {
-        setSupabaseProjects(prev => [result.project!, ...prev]);
-        setSelectedSupabaseProjectId(result.project.id);
-        setNewProject({
-          name: '',
-          therapeuticArea: '',
-          disease: '',
-          population: '',
-          nctId: '',
-          intervention: '',
-          comparator: '',
-        });
-        setIsCreatingProject(false);
-      } else if (result.error) {
-        alert(`Failed to create project: ${result.error}`);
-      }
-    } catch (err) {
-      console.error('Failed to create project:', err);
-      alert('Failed to create project');
-    }
-  };
-  
-  const resetProjectForm = () => {
-    setIsCreatingProject(false);
-    setNewProject({
-      name: '',
-      therapeuticArea: '',
-      disease: '',
-      population: '',
-      nctId: '',
-      intervention: '',
-      comparator: '',
-    });
-  };
+    loadProject();
+  }, [projectId]);
 
   // Image handling
   const handleImageUpload = useCallback((endpointIndex: number, type: 'km_plot' | 'risk_table', file: File) => {
@@ -386,7 +343,7 @@ export function KMDigitizer() {
           arm: 'all',  // Signal to extract ALL arms
           granularity: granularity,
           apiProvider: 'anthropic',
-          projectId: selectedSupabaseProjectId || undefined,
+          projectId: projectId || undefined,
         });
 
         if (result.success) {
@@ -629,12 +586,10 @@ export function KMDigitizer() {
         });
       });
 
-      // Use Supabase project if selected, otherwise fall back to URL projectId
-      const effectiveProjectId = selectedSupabaseProjectId || projectId || undefined;
-      console.log(`[KMDigitizer] Generating IPD for ${ipdRequests.length} arm(s)${effectiveProjectId ? ` (project: ${effectiveProjectId})` : ''}`);
+      console.log(`[KMDigitizer] Generating IPD for ${ipdRequests.length} arm(s)${projectId ? ` (project: ${projectId})` : ''}`);
 
-      // Pass projectId to save IPD to database if available
-      const result = await generatePseudoIPD(ipdRequests, effectiveProjectId);
+      // Pass projectId to save IPD to database
+      const result = await generatePseudoIPD(ipdRequests, projectId || undefined);
 
       if (result.success) {
         console.log('[KMDigitizer] IPD generation successful:', result.files);
@@ -785,18 +740,52 @@ export function KMDigitizer() {
     }
   };
 
+  // Show loading state
+  if (projectLoading) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading project...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if no project
+  if (projectError || !project) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="p-8 text-center max-w-md mx-auto">
+          <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Project Required</h2>
+          <p className="text-muted-foreground mb-4">
+            {projectError || 'Please access the KM Digitizer from a project to digitize curves.'}
+          </p>
+          <Button onClick={() => navigate('/projects')}>
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Go to Projects
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <Button variant="ghost" onClick={() => navigate(projectId ? `/projects/${projectId}` : '/projects')} className="mb-2">
+          <Button variant="ghost" onClick={() => navigate(`/projects/${projectId}`)} className="mb-2">
             <ChevronLeft className="h-4 w-4 mr-2" />
-            Back
+            Back to {project.name}
           </Button>
           <h1 className="text-3xl font-bold tracking-tight">KM Curve Digitizer</h1>
           <p className="text-muted-foreground mt-1">
-            Extract survival data from published Kaplan-Meier plots and generate Pseudo-IPD
+            Digitizing curves for <span className="font-medium text-foreground">{project.name}</span>
+            {project.therapeutic_area && <span> • {project.therapeutic_area}</span>}
           </p>
         </div>
       </div>
@@ -861,121 +850,14 @@ export function KMDigitizer() {
                   )}
                 </div>
 
-            {/* Supabase Project Selector */}
-            {supabaseConfigured && (
-              <div className="flex items-center gap-3">
-                <Database className="h-4 w-4 text-muted-foreground" />
-                <Label className="text-sm font-medium">Save to Project:</Label>
-                {!isCreatingProject ? (
-                  <>
-                    <select
-                      value={selectedSupabaseProjectId || ''}
-                      onChange={(e) => setSelectedSupabaseProjectId(e.target.value || null)}
-                      className="h-9 px-3 text-sm border rounded-md bg-background min-w-[200px]"
-                    >
-                      <option value="">Don't save to database</option>
-                      {supabaseProjects.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name} {project.hasIPD ? `(${project.ipdCount} records)` : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <Button size="sm" variant="outline" onClick={() => setIsCreatingProject(true)} className="gap-1">
-                      <Plus className="h-4 w-4" />
-                      New Project
-                    </Button>
-                  </>
-                ) : (
-                  <Button size="sm" variant="ghost" onClick={resetProjectForm}>
-                    <X className="h-4 w-4 mr-1" />
-                    Cancel
-                  </Button>
+            {/* Project Info - shown when project is loaded */}
+            {project && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-md text-sm">
+                <span className="text-muted-foreground">Project:</span>
+                <span className="font-medium">{project.name}</span>
+                {project.therapeutic_area && (
+                  <span className="text-xs text-muted-foreground">({project.therapeutic_area})</span>
                 )}
-              </div>
-            )}
-            
-            {/* Project Creation Form */}
-            {isCreatingProject && (
-              <div className="w-full pt-4 border-t mt-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Project Name *</Label>
-                    <input
-                      type="text"
-                      value={newProject.name}
-                      onChange={(e) => setNewProject(p => ({ ...p, name: e.target.value }))}
-                      placeholder="e.g., KEYNOTE-024 OS Analysis"
-                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">NCT ID</Label>
-                    <input
-                      type="text"
-                      value={newProject.nctId}
-                      onChange={(e) => setNewProject(p => ({ ...p, nctId: e.target.value }))}
-                      placeholder="e.g., NCT02142738"
-                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Therapeutic Area</Label>
-                    <input
-                      type="text"
-                      value={newProject.therapeuticArea}
-                      onChange={(e) => setNewProject(p => ({ ...p, therapeuticArea: e.target.value }))}
-                      placeholder="e.g., Oncology"
-                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Disease</Label>
-                    <input
-                      type="text"
-                      value={newProject.disease}
-                      onChange={(e) => setNewProject(p => ({ ...p, disease: e.target.value }))}
-                      placeholder="e.g., Advanced NSCLC"
-                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label className="text-xs text-muted-foreground">Population</Label>
-                    <input
-                      type="text"
-                      value={newProject.population}
-                      onChange={(e) => setNewProject(p => ({ ...p, population: e.target.value }))}
-                      placeholder="e.g., PD-L1 TPS ≥50%, ECOG PS 0-1, treatment-naïve"
-                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Intervention</Label>
-                    <input
-                      type="text"
-                      value={newProject.intervention}
-                      onChange={(e) => setNewProject(p => ({ ...p, intervention: e.target.value }))}
-                      placeholder="e.g., Pembrolizumab 200mg Q3W"
-                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Comparator</Label>
-                    <input
-                      type="text"
-                      value={newProject.comparator}
-                      onChange={(e) => setNewProject(p => ({ ...p, comparator: e.target.value }))}
-                      placeholder="e.g., Platinum-based Chemotherapy"
-                      className="h-9 w-full px-3 text-sm border rounded-md bg-background"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2 mt-4">
-                  <Button variant="outline" onClick={resetProjectForm}>Cancel</Button>
-                  <Button onClick={handleCreateProject} disabled={!newProject.name.trim()}>
-                    <Plus className="h-4 w-4 mr-1" />
-                    Create Project
-                  </Button>
-                </div>
               </div>
             )}
 
