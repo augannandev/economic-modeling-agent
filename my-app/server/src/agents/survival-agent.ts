@@ -148,9 +148,10 @@ async function checkPause(analysisId: string): Promise<void> {
 
 /**
  * Load data step
+ * Loads IPD from Supabase if project_id is set, otherwise from local/demo data
  */
 async function loadData(state: SurvivalAnalysisState): Promise<Partial<SurvivalAnalysisState>> {
-  const data = await loadPseudoIPD(state.endpointType);
+  const data = await loadPseudoIPD(state.endpointType, state.project_id);
   return {
     data,
     workflow_state: 'DATA_LOADED',
