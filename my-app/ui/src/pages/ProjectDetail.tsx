@@ -64,7 +64,6 @@ export function ProjectDetail() {
       setDataSources(dataSourcesData.data_sources);
     } catch (err: any) {
       console.error('Failed to load project:', err);
-      alert(`Failed to load project: ${err?.message || JSON.stringify(err)}`);
     } finally {
       setLoading(false);
     }
@@ -490,7 +489,14 @@ export function ProjectDetail() {
         <TabsContent value="data" className="space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold">Data Sources</h3>
-            <div>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline"
+                onClick={() => navigate(`/digitizer?project=${projectId}`)}
+              >
+                <Activity className="h-4 w-4 mr-2" />
+                Digitize KM Curves
+              </Button>
               <input
                 type="file"
                 id="file-upload"
