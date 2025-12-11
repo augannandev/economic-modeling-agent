@@ -15,6 +15,14 @@ import { analyses, models, visionAssessments, reasoningAssessments, plots, phTes
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { Distribution } from '../tools/one-piece-fitter';
+import { 
+  isSupabaseConfigured, 
+  createAnalysis as createSupabaseAnalysis,
+  updateAnalysis as updateSupabaseAnalysis,
+  saveModel as saveSupabaseModel,
+  savePHTest as saveSupabasePHTest,
+  saveSynthesisReport as saveSupabaseSynthesis
+} from '../lib/supabase';
 
 export type WorkflowState =
   | 'DATA_LOADED'
@@ -29,6 +37,8 @@ export type WorkflowState =
 export interface SurvivalAnalysisState {
   analysis_id: string;
   user_id: string;
+  project_id?: string;  // Optional: for saving to Supabase
+  supabase_analysis_id?: string;  // Supabase analysis UUID
   workflow_state: WorkflowState;
   progress: number;
   total_models: number;
@@ -817,17 +827,52 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
 /**
  * Run survival analysis workflow
  * This executes the workflow steps sequentially
+ * 
+ * @param analysisId - Local database analysis ID
+ * @param userId - User ID
+ * @param endpointType - 'OS' or 'PFS'
+ * @param projectId - Optional Supabase project ID for persistent storage
  */
-export async function runSurvivalAnalysisWorkflow(analysisId: string, userId: string, endpointType: 'OS' | 'PFS' = 'OS'): Promise<void> {
+export async function runSurvivalAnalysisWorkflow(
+  analysisId: string, 
+  userId: string, 
+  endpointType: 'OS' | 'PFS' = 'OS',
+  projectId?: string
+): Promise<void> {
   let state: SurvivalAnalysisState = {
     analysis_id: analysisId,
     user_id: userId,
+    project_id: projectId,
     endpointType,
     workflow_state: 'DATA_LOADED',
     progress: 0,
     total_models: 42,
     fitted_models: [],
   };
+
+  // Create Supabase analysis record if projectId provided
+  if (projectId && isSupabaseConfigured()) {
+    try {
+      const supabaseResult = await createSupabaseAnalysis({
+        project_id: projectId,
+        endpoint_type: endpointType,
+        status: 'running',
+        workflow_state: 'DATA_LOADED',
+        progress: 0,
+        total_steps: 42,
+        parameters: { localAnalysisId: analysisId },
+      });
+      
+      if (supabaseResult.data && supabaseResult.data.length > 0) {
+        state.supabase_analysis_id = supabaseResult.data[0].id;
+        console.log(`[Supabase] Created analysis record: ${state.supabase_analysis_id}`);
+      } else if (supabaseResult.error) {
+        console.warn(`[Supabase] Failed to create analysis: ${supabaseResult.error}`);
+      }
+    } catch (err) {
+      console.warn('[Supabase] Could not create analysis record:', err);
+    }
+  }
 
   try {
     // Step 1: Load data
@@ -841,6 +886,19 @@ export async function runSurvivalAnalysisWorkflow(analysisId: string, userId: st
     // Step 3: Test PH
     const phUpdate = await testPH(state);
     state = { ...state, ...phUpdate };
+    
+    // Save PH test to Supabase
+    if (state.supabase_analysis_id && state.ph_tests) {
+      await saveSupabasePHTest({
+        analysis_id: state.supabase_analysis_id,
+        chow_test_pvalue: state.ph_tests.chow_test_pvalue,
+        schoenfeld_pvalue: state.ph_tests.schoenfeld_pvalue,
+        logrank_pvalue: state.ph_tests.logrank_pvalue,
+        decision: state.ph_tests.decision,
+        rationale: state.ph_tests.rationale,
+        diagnostic_plots: state.ph_tests.diagnostic_plots,
+      }).catch(err => console.warn('[Supabase] PH test save error:', err));
+    }
 
     // Step 4: Fit one-piece models
     const onePieceUpdate = await fitOnePieceModels(state);
@@ -853,9 +911,50 @@ export async function runSurvivalAnalysisWorkflow(analysisId: string, userId: st
     // Step 6: Fit spline models
     const splineUpdate = await fitSplineModels(state);
     state = { ...state, ...splineUpdate };
+    
+    // Save all models to Supabase
+    if (state.supabase_analysis_id) {
+      for (const model of state.fitted_models) {
+        await saveSupabaseModel({
+          analysis_id: state.supabase_analysis_id,
+          arm: model.model_result.arm,
+          approach: model.model_result.approach,
+          distribution: model.model_result.distribution,
+          scale: model.model_result.scale,
+          knots: model.model_result.knots,
+          cutpoint: model.model_result.cutpoint,
+          parameters: model.model_result.parameters || {},
+          aic: model.model_result.aic,
+          bic: model.model_result.bic,
+          log_likelihood: model.model_result.log_likelihood,
+          model_order: state.fitted_models.indexOf(model) + 1,
+        }).catch(err => console.warn(`[Supabase] Model save error:`, err));
+      }
+      console.log(`[Supabase] Saved ${state.fitted_models.length} models`);
+    }
 
     // Step 7: Generate synthesis
     await generateSynthesis(state);
+    
+    // Save synthesis to Supabase
+    if (state.supabase_analysis_id && state.synthesis_report) {
+      await saveSupabaseSynthesis({
+        analysis_id: state.supabase_analysis_id,
+        primary_recommendation: state.synthesis_report.primary_recommendation,
+        key_uncertainties: state.synthesis_report.key_uncertainties,
+        hta_strategy: state.synthesis_report.hta_strategy,
+        full_text: state.synthesis_report.full_text || JSON.stringify(state.synthesis_report),
+      }).catch(err => console.warn('[Supabase] Synthesis save error:', err));
+      
+      // Update analysis as completed
+      await updateSupabaseAnalysis(state.supabase_analysis_id, {
+        status: 'completed',
+        workflow_state: 'SYNTHESIS_COMPLETE',
+        progress: state.total_models,
+      }).catch(err => console.warn('[Supabase] Analysis update error:', err));
+      
+      console.log(`[Supabase] Analysis complete and saved`);
+    }
   } catch (error) {
     // Update analysis status to failed with error message
     const db = await getDatabase(getDatabaseUrl()!);
@@ -870,6 +969,14 @@ export async function runSurvivalAnalysisWorkflow(analysisId: string, userId: st
         updated_at: new Date(),
       })
       .where(eq(analyses.id, analysisId));
+
+    // Also update Supabase if we have an analysis record
+    if (state.supabase_analysis_id) {
+      await updateSupabaseAnalysis(state.supabase_analysis_id, {
+        status: 'failed',
+        error_message: errorMessage,
+      }).catch(err => console.warn('[Supabase] Failed to update error status:', err));
+    }
 
     // Don't re-throw - error is logged and stored
     return;

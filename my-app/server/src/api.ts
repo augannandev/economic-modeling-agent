@@ -138,7 +138,7 @@ survivalRoutes.use('*', authMiddleware);
 survivalRoutes.post('/analyze', async (c) => {
   try {
     const user = c.get('user');
-    const { endpointType = 'OS' } = await c.req.json().catch(() => ({}));
+    const { endpointType = 'OS', projectId } = await c.req.json().catch(() => ({}));
     const analysisId = randomUUID();
     const db = await getDatabase(getDatabaseUrl()!);
 
@@ -150,11 +150,17 @@ survivalRoutes.post('/analyze', async (c) => {
       workflow_state: 'DATA_LOADED',
       progress: 0,
       total_models: 42,
-      parameters: { endpointType },
+      parameters: { endpointType, projectId },
     });
 
     // Run workflow asynchronously
-    runSurvivalAnalysisWorkflow(analysisId, user.id, endpointType as 'OS' | 'PFS').catch((error) => {
+    // If projectId is provided, results will also be saved to Supabase
+    runSurvivalAnalysisWorkflow(
+      analysisId, 
+      user.id, 
+      endpointType as 'OS' | 'PFS',
+      projectId  // Pass projectId for Supabase storage
+    ).catch((error) => {
       console.error('Workflow error:', error);
     });
 
@@ -162,6 +168,7 @@ survivalRoutes.post('/analyze', async (c) => {
       analysis_id: analysisId,
       status: 'running',
       message: 'Analysis workflow started',
+      projectId: projectId || null,
     });
   } catch (error) {
     console.error('Error starting analysis:', error);

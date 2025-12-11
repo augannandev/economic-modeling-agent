@@ -303,6 +303,118 @@ export async function updateAnalysis(analysisId: string, updates: Partial<Analys
 }
 
 // ============================================
+// Model Functions
+// ============================================
+
+export interface ModelRecord {
+  id?: string;
+  analysis_id: string;
+  arm: string;
+  approach: string;
+  distribution?: string;
+  scale?: string;
+  knots?: number;
+  cutpoint?: number;
+  parameters: Record<string, unknown>;
+  aic?: number;
+  bic?: number;
+  log_likelihood?: number;
+  survival_predictions?: { time: number; survival: number }[];
+  milestone_survival?: Record<string, number>;
+  model_order: number;
+  created_at?: string;
+}
+
+export interface PHTestRecord {
+  id?: string;
+  analysis_id: string;
+  chow_test_pvalue?: number;
+  schoenfeld_pvalue?: number;
+  logrank_pvalue?: number;
+  decision: string;
+  rationale?: string;
+  diagnostic_plots?: Record<string, string>;
+  vision_assessment?: Record<string, unknown>;
+  reasoning_assessment?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface SynthesisReportRecord {
+  id?: string;
+  analysis_id: string;
+  within_approach_rankings?: Record<string, unknown>;
+  cross_approach_comparison?: Record<string, unknown>;
+  primary_recommendation?: string;
+  sensitivity_recommendations?: Record<string, unknown>;
+  key_uncertainties?: string;
+  hta_strategy?: string;
+  full_text: string;
+  token_usage?: number;
+  created_at?: string;
+}
+
+/**
+ * Save a fitted model to Supabase
+ */
+export async function saveModel(model: Omit<ModelRecord, 'id' | 'created_at'>): Promise<SupabaseResponse<ModelRecord[]>> {
+  return supabaseRequest<ModelRecord[]>('models', {
+    method: 'POST',
+    body: model,
+  });
+}
+
+/**
+ * Get models for an analysis
+ */
+export async function getAnalysisModels(analysisId: string): Promise<SupabaseResponse<ModelRecord[]>> {
+  return supabaseRequest<ModelRecord[]>('models', {
+    method: 'GET',
+    filters: { analysis_id: `eq.${analysisId}` },
+    order: 'model_order.asc',
+  });
+}
+
+/**
+ * Save PH test results
+ */
+export async function savePHTest(phTest: Omit<PHTestRecord, 'id' | 'created_at'>): Promise<SupabaseResponse<PHTestRecord[]>> {
+  return supabaseRequest<PHTestRecord[]>('ph_tests', {
+    method: 'POST',
+    body: phTest,
+  });
+}
+
+/**
+ * Get PH test for an analysis
+ */
+export async function getAnalysisPHTest(analysisId: string): Promise<SupabaseResponse<PHTestRecord[]>> {
+  return supabaseRequest<PHTestRecord[]>('ph_tests', {
+    method: 'GET',
+    filters: { analysis_id: `eq.${analysisId}` },
+  });
+}
+
+/**
+ * Save synthesis report
+ */
+export async function saveSynthesisReport(report: Omit<SynthesisReportRecord, 'id' | 'created_at'>): Promise<SupabaseResponse<SynthesisReportRecord[]>> {
+  return supabaseRequest<SynthesisReportRecord[]>('synthesis_reports', {
+    method: 'POST',
+    body: report,
+  });
+}
+
+/**
+ * Get synthesis report for an analysis
+ */
+export async function getAnalysisSynthesis(analysisId: string): Promise<SupabaseResponse<SynthesisReportRecord[]>> {
+  return supabaseRequest<SynthesisReportRecord[]>('synthesis_reports', {
+    method: 'GET',
+    filters: { analysis_id: `eq.${analysisId}` },
+  });
+}
+
+// ============================================
 // KM Extraction Cache Functions
 // ============================================
 
