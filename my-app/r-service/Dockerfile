@@ -81,6 +81,20 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'zoo' %in% rownames(installed.packages())) stop('zoo installation failed'); \
     cat('✓ zoo installed\n')"
 
+# Install ggplot2 (required by IPDfromKM)
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    cat('Installing ggplot2...\n'); \
+    install.packages('ggplot2', quiet=FALSE); \
+    stopifnot('ggplot2' %in% rownames(installed.packages())); \
+    cat('✓ ggplot2 installed\n')"
+
+# Install gridExtra (required by IPDfromKM)
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    cat('Installing gridExtra...\n'); \
+    install.packages('gridExtra', quiet=FALSE); \
+    stopifnot('gridExtra' %in% rownames(installed.packages())); \
+    cat('✓ gridExtra installed\n')"
+
 # Install remotes (lightweight) once
 RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
     if (!require('remotes', quietly=TRUE)) install.packages('remotes', Ncpus=2)"
