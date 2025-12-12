@@ -121,6 +121,55 @@ def fit_km_curves(chemo_data: Dict, pembro_data: Dict) -> Dict:
         }
     }
 
+def _predict_survival_at_time(fitter, time: float) -> float:
+    """Helper function to predict survival at a specific time point"""
+    try:
+        # Try survival_function_at_times (lifelines standard method)
+        if hasattr(fitter, 'survival_function_at_times'):
+            result = fitter.survival_function_at_times([time])
+            # Handle different return types
+            if hasattr(result, 'values'):
+                vals = result.values
+                # Handle both 1D and 2D arrays
+                if vals.ndim == 1:
+                    return float(vals[0])
+                else:
+                    return float(vals[0, 0])
+            elif hasattr(result, 'iloc'):
+                # DataFrame-like object
+                if len(result.columns) > 0:
+                    return float(result.iloc[0, 0])
+                else:
+                    return float(result.iloc[0])
+            elif isinstance(result, (list, np.ndarray)):
+                return float(result[0] if len(result) > 0 else 0.0)
+            else:
+                return float(result)
+        # Fallback for custom fitters (like Gompertz)
+        elif hasattr(fitter, 'predict_survival'):
+            result = fitter.predict_survival(time)
+            if hasattr(result, 'item'):
+                return float(result.item())
+            elif isinstance(result, (list, np.ndarray)):
+                return float(result[0] if len(result) > 0 else 0.0)
+            else:
+                return float(result)
+        # Last resort: use survival_function_ and interpolate
+        elif hasattr(fitter, 'survival_function_'):
+            sf = fitter.survival_function_
+            timeline = sf.index.values
+            if time <= timeline[-1]:
+                # Interpolate
+                return float(np.interp(time, timeline, sf.iloc[:, 0].values))
+            else:
+                # Extrapolate using last value (conservative)
+                return float(sf.iloc[-1, 0])
+        else:
+            return 0.0
+    except Exception as e:
+        print(f"Warning: Error predicting survival at {time}: {e}")
+        return 0.0
+
 def fit_one_piece_model(data: Dict, arm: str, distribution: str) -> Dict:
     """Fit one-piece parametric survival model"""
     df = pd.DataFrame(data)
@@ -171,8 +220,8 @@ def fit_one_piece_model(data: Dict, arm: str, distribution: str) -> Dict:
         "bic": float(bic) if bic is not None else None,
         "log_likelihood": float(log_likelihood) if log_likelihood is not None else None,
         "predictions": {
-            "60": float(fitter.predict_survival_function(60).item() if hasattr(fitter.predict_survival_function(60), 'item') else fitter.predict_survival_function(60)),
-            "120": float(fitter.predict_survival_function(120).item() if hasattr(fitter.predict_survival_function(120), 'item') else fitter.predict_survival_function(120))
+            "60": _predict_survival_at_time(fitter, 60),
+            "120": _predict_survival_at_time(fitter, 120)
         }
     }
 

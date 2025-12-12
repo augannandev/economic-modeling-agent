@@ -65,12 +65,12 @@ class GompertzFitter:
         return -ll
 
     def predict_survival(self, times):
-        if self.params_ is None:
+        if self._params is None:
             return np.zeros_like(times)
             
-        log_lambda, gamma = self.params_
+        log_lambda, gamma = self._params
         lambda_ = np.exp(log_lambda)
-        times = np.array(times)
+        times = np.array(times, dtype=float)
         
         if abs(gamma) < 1e-9:
             H_t = lambda_ * times

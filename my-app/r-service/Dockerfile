@@ -3,7 +3,7 @@ FROM r-base:4.3.0
 WORKDIR /app
 
 # Install system dependencies (including libsodium-dev for plumber dependency)
-# Also include libraries needed for devtools/remotes and graphics packages
+# Also include libraries needed for remotes and graphics packages
 RUN apt-get update && apt-get install -y \
     libcurl4-openssl-dev \
     libssl-dev \
@@ -81,57 +81,16 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'zoo' %in% rownames(installed.packages())) stop('zoo installation failed'); \
     cat('✓ zoo installed\n')"
 
-# Install IPDfromKM - try remotes first, then devtools
-# We really want this package, so we'll try hard to get it installed
-RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    cat('Installing IPDfromKM (required package)...\n'); \
-    success <- FALSE; \
-    # First try remotes (lighter weight) \
-    if (!success) { \
-    tryCatch({ \
-    cat('Attempting installation via remotes...\n'); \
-    if (!require('remotes', quietly = TRUE)) { \
-    install.packages('remotes', repos='https://cloud.r-project.org', dependencies = c('Depends', 'Imports'), quiet = FALSE); \
-    }; \
-    if (require('remotes', quietly = TRUE)) { \
-    remotes::install_github('NaLiuStat/IPDfromKM', dependencies = c('Depends', 'Imports'), upgrade='never', quiet = FALSE); \
-    if ('IPDfromKM' %in% rownames(installed.packages())) { \
-    cat('✓ IPDfromKM installed via remotes\n'); \
-    success <<- TRUE; \
-    } \
-    } \
-    }, error = function(e) { \
-    cat('Note: remotes installation failed:', e\$message, '\n'); \
-    }); \
-    }; \
-    # Fallback to devtools if remotes failed \
-    if (!success) { \
-    tryCatch({ \
-    cat('Trying devtools as fallback...\n'); \
-    # Install devtools with its dependencies \
-    if (!require('devtools', quietly = TRUE)) { \
-    cat('Installing devtools (this may take a while)...\n'); \
-    install.packages('devtools', repos='https://cloud.r-project.org', dependencies = c('Depends', 'Imports'), quiet = FALSE); \
-    }; \
-    if (require('devtools', quietly = TRUE)) { \
-    cat('Installing IPDfromKM via devtools...\n'); \
-    devtools::install_github('NaLiuStat/IPDfromKM', dependencies = c('Depends', 'Imports'), upgrade='never', quiet = FALSE); \
-    if ('IPDfromKM' %in% rownames(installed.packages())) { \
-    cat('✓ IPDfromKM installed via devtools\n'); \
-    success <<- TRUE; \
-    } \
-    } \
-    }, error = function(e) { \
-    cat('ERROR: devtools installation failed:', e\$message, '\n'); \
-    }); \
-    }; \
-    if (!success) { \
-    cat('ERROR: IPDfromKM installation failed after all attempts!\n'); \
-    cat('This is a required package. Build Failed to install IPDfromKM.\n'); \
-    stop('IPDfromKM installation failed - this package is required'); \
-    } else { \
-    cat('✓ IPDfromKM successfully installed and verified\n'); \
-    }"
+# Install remotes (lightweight) once
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    if (!require('remotes', quietly=TRUE)) install.packages('remotes', Ncpus=2)"
+
+# Install IPDfromKM (required) - no devtools, no dependency explosion
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    cat('Installing IPDfromKM from GitHub...\n'); \
+    remotes::install_github('NaLiuStat/IPDfromKM', dependencies=FALSE, upgrade='never', build_vignettes=FALSE); \
+    stopifnot('IPDfromKM' %in% rownames(installed.packages())); \
+    cat('✓ IPDfromKM installed and verified\n')"
 
 # Install flexsurv (required by survival_models.R)
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
@@ -148,21 +107,6 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     install.packages('rstpm2', repos='https://cloud.r-project.org', quiet = FALSE); \
     if (!'rstpm2' %in% rownames(installed.packages())) stop('rstpm2 installation failed'); \
     cat('✓ rstpm2 installed\n')"
-
-# Install survminer (optional, for enhanced KM plots)
-RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    cat('Installing survminer (optional, for enhanced plots)...\n'); \
-    tryCatch({ \
-    install.packages('survminer', repos='https://cloud.r-project.org', dependencies = FALSE, quiet = FALSE); \
-    if ('survminer' %in% rownames(installed.packages())) { \
-    cat('✓ survminer installed\n'); \
-    } else { \
-    cat('⚠️  survminer installation failed (optional package)\n'); \
-    } \
-    }, error = function(e) { \
-    cat('⚠️  survminer installation failed (optional):', e\$message, '\n'); \
-    cat('Service will use base R plotting instead\n'); \
-    })"
 
 # Copy application code
 COPY . .

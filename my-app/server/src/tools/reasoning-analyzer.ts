@@ -133,9 +133,11 @@ export async function assessWithReasoningLLM(
       let status = '✅ PASS';
 
       if (b5y.hard_max && pred5y > b5y.hard_max) {
-        status = '⚠️ HARD MAX VIOLATION (Downgrade Extrapolation Score)';
-      } else if (pred5y < b5y.range[0] || pred5y > b5y.range[1]) {
-        status = '⚠️ Outside Expected Range';
+        status = '⚠️ Implausible (Significantly Overestimates)';
+      } else if (pred5y > b5y.range[1]) {
+        status = '⚠️ Optimistic (Above Benchmark)';
+      } else if (pred5y < b5y.range[0]) {
+        status = '⚠️ Pessimistic (Below Benchmark)';
       }
 
       quantValidation += `- 5y Computed OS: ${(pred5y * 100).toFixed(1)}% vs Range ${(b5y.range[0] * 100).toFixed(0)}-${(b5y.range[1] * 100).toFixed(0)}% (Max ${(b5y.hard_max || 0) * 100}%) -> ${status}\n`;
@@ -147,8 +149,10 @@ export async function assessWithReasoningLLM(
       const b10y = benchmarks['10y'];
       let status = '✅ PASS';
 
-      if (pred10y < b10y.range[0] || pred10y > b10y.range[1]) {
-        status = '⚠️ Outside Expected Range';
+      if (pred10y > b10y.range[1]) {
+        status = '⚠️ Optimistic (Above Benchmark)';
+      } else if (pred10y < b10y.range[0]) {
+        status = '⚠️ Pessimistic (Below Benchmark)';
       }
 
       quantValidation += `- 10y Computed OS: ${(pred10y * 100).toFixed(1)}% vs Range ${(b10y.range[0] * 100).toFixed(0)}-${(b10y.range[1] * 100).toFixed(0)}% -> ${status}\n`;
@@ -159,8 +163,9 @@ export async function assessWithReasoningLLM(
   const prompt = `You are a senior health economist synthesizing vision analysis for a survival model.
   
   CRITICAL: You must incorporate the "Quantitative Benchmark Validation" below into your scoring and reasoning.
-  - If a model violates a HARD MAX, you MUST downgrade the Extrapolation score significantly (<5) and mark as "Screen Out" or "Scenario" (unless fit is exceptional).
-  - If a model is outside the expected range, note it as a weakness.
+  - REFER to the plausibility status provided (e.g. "Implausible", "Optimistic", "Pessimistic").
+  - If "Implausible": Downgrade Extrapolation score (<5) and Screen Out.
+  - If "Pessimistic" or "Optimistic": Note as a limitation/bias; acceptable for scenarios but may require justification for Base Case.
 
 ## INPUT DATA (DO NOT REPEAT - SUMMARIZE ONLY)
 
