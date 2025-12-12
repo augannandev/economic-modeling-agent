@@ -398,11 +398,7 @@ def generate_ph_diagnostic_plots(chemo_df: pd.DataFrame, pembro_df: pd.DataFrame
         ax.set_ylabel('Beta(t) for TRT01PSOC', fontsize=12, fontweight='bold')
         ax.set_xlabel('Time', fontsize=12, fontweight='bold')
         
-        # Title matching reference format
-        # Try to infer endpoint type from data context (default to OS)
-        endpoint_type = 'OS'  # Default, could be enhanced to detect from data source
-        title = f'Figure 30. Schoenfeld residuals plot of {endpoint_type} for pembrolizumab and SOC based on KEYNOTE-024'
-        ax.set_title(title, fontsize=13, fontweight='bold', pad=10)
+        # No title - keep plot clean
         
         # Grid styling matching reference
         ax.grid(True, alpha=0.3, which='both', linestyle='-', linewidth=0.5)

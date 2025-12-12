@@ -22,6 +22,11 @@ interface ArmStatistics {
   follow_up_range: string;
 }
 
+interface ArmMeta {
+  name: string;
+  color: string;
+}
+
 interface IPDRecord {
   patient_id: number;
   time: number;
@@ -33,10 +38,8 @@ interface IPDDataResponse {
   endpoint: string;
   source: string;
   records: IPDRecord[];
-  statistics: {
-    pembro: ArmStatistics;
-    chemo: ArmStatistics;
-  };
+  arms: ArmMeta[];
+  statistics: Record<string, ArmStatistics>;
   km_plot_base64: string | null;
   available: boolean;
   projectId?: string;
@@ -71,6 +74,59 @@ function StatItem({
         {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
       </div>
     </div>
+  );
+}
+
+// Arm statistics card component
+function ArmStatsCard({ 
+  armName, 
+  color, 
+  stats 
+}: { 
+  armName: string; 
+  color: string; 
+  stats: ArmStatistics;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <div 
+            className="w-3 h-3 rounded-full" 
+            style={{ backgroundColor: color }}
+          />
+          {armName}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4">
+          <StatItem 
+            icon={Users} 
+            label="Patients" 
+            value={stats.n || 0} 
+          />
+          <StatItem 
+            icon={AlertCircle} 
+            label="Events" 
+            value={stats.events || 0} 
+          />
+          <StatItem 
+            icon={Calendar} 
+            label="Median Survival" 
+            value={stats.median != null ? `${stats.median.toFixed(1)} mo` : 'Not reached'}
+            subtitle={stats.ci_lower != null ? 
+              `(95% CI: ${stats.ci_lower.toFixed(1)}-${stats.ci_upper?.toFixed(1) || 'NR'})` : 
+              undefined
+            }
+          />
+          <StatItem 
+            icon={BarChart3} 
+            label="Follow-up" 
+            value={stats.follow_up_range || 'N/A'} 
+          />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -116,7 +172,7 @@ export function IPDDataTab({ analysisId }: IPDDataTabProps) {
     
     const filteredRecords = filterArm === 'all' 
       ? data.records 
-      : data.records.filter(r => r.arm.toLowerCase().includes(filterArm.toLowerCase()));
+      : data.records.filter(r => r.arm === filterArm);
     
     const csvContent = [
       ['patient_id', 'time', 'event', 'arm'].join(','),
@@ -130,6 +186,25 @@ export function IPDDataTab({ analysisId }: IPDDataTabProps) {
     a.download = `ipd_data_${data.endpoint}_${analysisId.substring(0, 8)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Get arm color by name
+  const getArmColor = (armName: string): string => {
+    if (!data?.arms) return '#888888';
+    const arm = data.arms.find(a => a.name === armName);
+    return arm?.color || '#888888';
+  };
+
+  // Get unique arm names from records (fallback if arms array is missing)
+  const getArmNames = (): string[] => {
+    if (data?.arms && data.arms.length > 0) {
+      return data.arms.map(a => a.name);
+    }
+    // Fallback: derive from records
+    if (data?.records) {
+      return [...new Set(data.records.map(r => r.arm))];
+    }
+    return [];
   };
 
   if (loading) {
@@ -166,9 +241,10 @@ export function IPDDataTab({ analysisId }: IPDDataTabProps) {
     );
   }
 
+  const armNames = getArmNames();
   const filteredRecords = filterArm === 'all' 
     ? data.records 
-    : data.records.filter(r => r.arm.toLowerCase().includes(filterArm.toLowerCase()));
+    : data.records.filter(r => r.arm === filterArm);
 
   return (
     <div className="space-y-6">
@@ -184,6 +260,7 @@ export function IPDDataTab({ analysisId }: IPDDataTabProps) {
               Source: {data.source === 'project' ? data.projectName || 'Project' : 'Demo Data'}
               {' '}&bull;{' '}
               {data.records.length} patients
+              {armNames.length > 0 && ` across ${armNames.length} arms`}
             </p>
           </div>
         </div>
@@ -215,83 +292,31 @@ export function IPDDataTab({ analysisId }: IPDDataTabProps) {
           </CardContent>
         </Card>
 
-        {/* Statistics */}
+        {/* Statistics - Dynamic rendering for all arms */}
         <div className="space-y-4">
-          {/* Pembrolizumab Stats */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-orange-500" />
-                Pembrolizumab
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <StatItem 
-                  icon={Users} 
-                  label="Patients" 
-                  value={data.statistics.pembro.n || 0} 
-                />
-                <StatItem 
-                  icon={AlertCircle} 
-                  label="Events" 
-                  value={data.statistics.pembro.events || 0} 
-                />
-                <StatItem 
-                  icon={Calendar} 
-                  label="Median Survival" 
-                  value={data.statistics.pembro.median != null ? `${data.statistics.pembro.median.toFixed(1)} mo` : 'Not reached'}
-                  subtitle={data.statistics.pembro.ci_lower != null ? 
-                    `(95% CI: ${data.statistics.pembro.ci_lower.toFixed(1)}-${data.statistics.pembro.ci_upper?.toFixed(1) || 'NR'})` : 
-                    undefined
-                  }
-                />
-                <StatItem 
-                  icon={BarChart3} 
-                  label="Follow-up" 
-                  value={data.statistics.pembro.follow_up_range || 'N/A'} 
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Chemotherapy Stats */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-blue-500" />
-                Chemotherapy
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <StatItem 
-                  icon={Users} 
-                  label="Patients" 
-                  value={data.statistics.chemo.n || 0} 
-                />
-                <StatItem 
-                  icon={AlertCircle} 
-                  label="Events" 
-                  value={data.statistics.chemo.events || 0} 
-                />
-                <StatItem 
-                  icon={Calendar} 
-                  label="Median Survival" 
-                  value={data.statistics.chemo.median != null ? `${data.statistics.chemo.median.toFixed(1)} mo` : 'Not reached'}
-                  subtitle={data.statistics.chemo.ci_lower != null ? 
-                    `(95% CI: ${data.statistics.chemo.ci_lower.toFixed(1)}-${data.statistics.chemo.ci_upper?.toFixed(1) || 'NR'})` : 
-                    undefined
-                  }
-                />
-                <StatItem 
-                  icon={BarChart3} 
-                  label="Follow-up" 
-                  value={data.statistics.chemo.follow_up_range || 'N/A'} 
-                />
-              </div>
-            </CardContent>
-          </Card>
+          {armNames.map((armName) => {
+            const stats = data.statistics[armName];
+            const color = getArmColor(armName);
+            
+            if (!stats) return null;
+            
+            return (
+              <ArmStatsCard 
+                key={armName}
+                armName={armName}
+                color={color}
+                stats={stats}
+              />
+            );
+          })}
+          
+          {armNames.length === 0 && (
+            <Card>
+              <CardContent className="pt-6 text-center text-muted-foreground">
+                No arm statistics available
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
 
@@ -313,8 +338,9 @@ export function IPDDataTab({ analysisId }: IPDDataTabProps) {
                 className="text-sm border rounded px-2 py-1 bg-background"
               >
                 <option value="all">All Arms</option>
-                <option value="pembro">Pembrolizumab</option>
-                <option value="chemo">Chemotherapy</option>
+                {armNames.map(armName => (
+                  <option key={armName} value={armName}>{armName}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -353,10 +379,10 @@ export function IPDDataTab({ analysisId }: IPDDataTabProps) {
                     </td>
                     <td className="p-2">
                       <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "w-2 h-2 rounded-full",
-                          record.arm.toLowerCase().includes('pembro') ? "bg-orange-500" : "bg-blue-500"
-                        )} />
+                        <div 
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: getArmColor(record.arm) }}
+                        />
                         {record.arm}
                       </div>
                     </td>

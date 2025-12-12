@@ -90,9 +90,7 @@ def plot_schoenfeld_residuals(residuals, times, p_value, smooth_times=None, smoo
     # Y-axis label matching reference style
     ax.set_ylabel('Beta(t) for TRT01PSOC', fontsize=12, fontweight='bold')
     
-    # Title matching reference style
-    ax.set_title(f'Figure 30. Schoenfeld residuals plot of OS for pembrolizumab and SOC based on KEYNOTE-024', 
-                 fontsize=13, fontweight='bold', pad=10)
+    # No title - keep plot clean
     
     # Set appropriate x-axis limits and ticks (matching reference)
     ax.set_xlim(left=0.3, right=max(times) * 1.5)
