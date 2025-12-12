@@ -753,14 +753,13 @@ plot_km_dynamic <- function(req) {
         arm = factor(all_arms, levels = arm_names)
       )
 
-      # Fit KM curves
-      surv_obj <- Surv(time = all_data$time, event = all_data$event) # nolint
-      fit <- survfit(surv_obj ~ arm, data = all_data)
+      # Fit KM curves - use Surv() directly in formula to avoid scoping issues
+      fit <- survfit(Surv(time, event) ~ arm, data = all_data)
 
       # Calculate log-rank test p-value (only if 2+ arms)
       p_value <- NA
       if (length(arm_names) >= 2) {
-        logrank_test <- survdiff(surv_obj ~ arm, data = all_data)
+        logrank_test <- survdiff(Surv(time, event) ~ arm, data = all_data)
         p_value <- 1 - pchisq(logrank_test$chisq, length(logrank_test$n) - 1)
       }
 
