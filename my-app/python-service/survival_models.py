@@ -1,6 +1,8 @@
 """Survival model fitting functions"""
 import pandas as pd
 import numpy as np
+import os
+import requests
 from lifelines import (
     KaplanMeierFitter, 
     WeibullFitter, 
@@ -14,6 +16,72 @@ from custom_spline_models import RoystonParmarFitter
 from custom_gompertz import GompertzFitter
 from typing import Dict, List, Optional
 import json
+
+# R service URL for fallback
+R_SERVICE_URL = os.environ.get('R_SERVICE_URL', 'http://localhost:8001')
+
+
+def _try_r_service_parametric(time: list, event: list, distribution: str, arm: str) -> Optional[Dict]:
+    """Try to fit parametric model using R service as fallback"""
+    try:
+        response = requests.post(
+            f"{R_SERVICE_URL}/fit-parametric",
+            json={"time": time, "event": event, "distribution": distribution},
+            timeout=30
+        )
+        if response.status_code == 200:
+            r_result = response.json()
+            if 'error' not in r_result:
+                print(f"Successfully used R service for {distribution} model")
+                return {
+                    "model_id": f"{arm}_{distribution}_one_piece",
+                    "arm": arm,
+                    "approach": "one-piece",
+                    "distribution": distribution,
+                    "parameters": r_result.get('parameters', {}),
+                    "aic": r_result.get('aic'),
+                    "bic": r_result.get('bic'),
+                    "log_likelihood": r_result.get('log_likelihood'),
+                    "predictions": r_result.get('predictions', {}),
+                    "fitted_by": "R"
+                }
+            else:
+                print(f"R service error for {distribution}: {r_result['error']}")
+    except Exception as e:
+        print(f"R service fallback failed for {distribution}: {e}")
+    return None
+
+
+def _try_r_service_spline(time: list, event: list, scale: str, knots: int, arm: str) -> Optional[Dict]:
+    """Try to fit spline model using R service as fallback"""
+    try:
+        response = requests.post(
+            f"{R_SERVICE_URL}/fit-rp-spline",
+            json={"time": time, "event": event, "scale": scale, "knots": knots},
+            timeout=30
+        )
+        if response.status_code == 200:
+            r_result = response.json()
+            if 'error' not in r_result:
+                print(f"Successfully used R service for spline model ({scale}, {knots} knots)")
+                return {
+                    "model_id": f"{arm}_{scale}_knots{knots}_spline",
+                    "arm": arm,
+                    "approach": "spline",
+                    "scale": scale,
+                    "knots": knots,
+                    "parameters": {'coeffs': list(r_result.get('parameters', {}).values())},
+                    "aic": r_result.get('aic'),
+                    "bic": r_result.get('bic'),
+                    "log_likelihood": r_result.get('log_likelihood'),
+                    "predictions": r_result.get('predictions', {}),
+                    "fitted_by": "R"
+                }
+            else:
+                print(f"R service error for spline: {r_result['error']}")
+    except Exception as e:
+        print(f"R service fallback failed for spline: {e}")
+    return None
 
 def fit_spline_model(data: Dict, arm: str, scale: str, knots: int) -> Dict:
     """Fit flexible parametric spline model using SplineFitter
@@ -61,17 +129,32 @@ def fit_spline_model(data: Dict, arm: str, scale: str, knots: int) -> Dict:
             "parameters": params,
             "aic": aic,
             "bic": bic,
-            "bic": bic,
             "log_likelihood": log_likelihood,
             "predictions": {
                 "60": float(fitter.predict_survival(60).item() if hasattr(fitter.predict_survival(60), 'item') else fitter.predict_survival(60)),
                 "120": float(fitter.predict_survival(120).item() if hasattr(fitter.predict_survival(120), 'item') else fitter.predict_survival(120))
-            }
+            },
+            "fitted_by": "Python"
         }
     except Exception as e:
         # Log the error for debugging
-        print(f"Error fitting spline model for {arm} with {knots} knots: {e}")
-        # Fallback: return basic structure if fitting fails
+        print(f"Python spline fitting failed for {arm} with {knots} knots: {e}")
+        print("Attempting R service fallback...")
+        
+        # Try R service as fallback
+        r_result = _try_r_service_spline(
+            time=df['time'].tolist(),
+            event=df['event'].tolist(),
+            scale=scale,
+            knots=knots,
+            arm=arm
+        )
+        
+        if r_result:
+            return r_result
+        
+        # Both Python and R failed - return error structure
+        print(f"Both Python and R failed for spline model")
         return {
             "model_id": f"{arm}_{scale}_knots{knots}_spline",
             "arm": arm,
@@ -81,7 +164,8 @@ def fit_spline_model(data: Dict, arm: str, scale: str, knots: int) -> Dict:
             "parameters": {"error": str(e)},
             "aic": None,
             "bic": None,
-            "log_likelihood": None
+            "log_likelihood": None,
+            "error": f"Both Python and R failed: {str(e)}"
         }
 
 def fit_km_curves(chemo_data: Dict, pembro_data: Dict) -> Dict:
@@ -171,7 +255,7 @@ def _predict_survival_at_time(fitter, time: float) -> float:
         return 0.0
 
 def fit_one_piece_model(data: Dict, arm: str, distribution: str) -> Dict:
-    """Fit one-piece parametric survival model"""
+    """Fit one-piece parametric survival model with R fallback"""
     df = pd.DataFrame(data)
     
     # Map distribution names to fitters
@@ -184,44 +268,63 @@ def fit_one_piece_model(data: Dict, arm: str, distribution: str) -> Dict:
         'generalized-gamma': GeneralizedGammaFitter
     }
     
-    if distribution not in fitters:
-        raise ValueError(f"Unknown distribution: {distribution}")
-    
-    Fitter = fitters[distribution]
-    fitter = Fitter()
-    
     # Handle zero times by adding a small epsilon, as parametric models require t > 0
     times = df['time'].copy()
     times[times <= 0] = 1e-5
     
-    fitter.fit(times, df['event'])
-    
-    # Extract parameters
-    if hasattr(fitter, 'params_'):
-        if isinstance(fitter.params_, dict):
-            params = fitter.params_
+    # Try Python first
+    try:
+        if distribution not in fitters:
+            raise ValueError(f"Unknown distribution: {distribution}")
+        
+        Fitter = fitters[distribution]
+        fitter = Fitter()
+        fitter.fit(times, df['event'])
+        
+        # Extract parameters
+        if hasattr(fitter, 'params_'):
+            if isinstance(fitter.params_, dict):
+                params = fitter.params_
+            else:
+                params = fitter.params_.to_dict()
         else:
-            params = fitter.params_.to_dict()
-    else:
-        params = {}
-    
-    # Calculate AIC/BIC
-    aic = fitter.AIC_ if hasattr(fitter, 'AIC_') else None
-    bic = fitter.BIC_ if hasattr(fitter, 'BIC_') else None
-    log_likelihood = fitter.log_likelihood_ if hasattr(fitter, 'log_likelihood_') else None
-    
-    return {
-        "model_id": f"{arm}_{distribution}_one_piece",
-        "arm": arm,
-        "approach": "one-piece",
-        "distribution": distribution,
-        "parameters": params,
-        "aic": float(aic) if aic is not None else None,
-        "bic": float(bic) if bic is not None else None,
-        "log_likelihood": float(log_likelihood) if log_likelihood is not None else None,
-        "predictions": {
-            "60": _predict_survival_at_time(fitter, 60),
-            "120": _predict_survival_at_time(fitter, 120)
+            params = {}
+        
+        # Calculate AIC/BIC
+        aic = fitter.AIC_ if hasattr(fitter, 'AIC_') else None
+        bic = fitter.BIC_ if hasattr(fitter, 'BIC_') else None
+        log_likelihood = fitter.log_likelihood_ if hasattr(fitter, 'log_likelihood_') else None
+        
+        return {
+            "model_id": f"{arm}_{distribution}_one_piece",
+            "arm": arm,
+            "approach": "one-piece",
+            "distribution": distribution,
+            "parameters": params,
+            "aic": float(aic) if aic is not None else None,
+            "bic": float(bic) if bic is not None else None,
+            "log_likelihood": float(log_likelihood) if log_likelihood is not None else None,
+            "predictions": {
+                "60": _predict_survival_at_time(fitter, 60),
+                "120": _predict_survival_at_time(fitter, 120)
+            },
+            "fitted_by": "Python"
         }
-    }
+    except Exception as e:
+        print(f"Python {distribution} fitting failed: {e}")
+        print("Attempting R service fallback...")
+        
+        # Try R service as fallback
+        r_result = _try_r_service_parametric(
+            time=df['time'].tolist(),
+            event=df['event'].tolist(),
+            distribution=distribution,
+            arm=arm
+        )
+        
+        if r_result:
+            return r_result
+        
+        # Both Python and R failed - raise error
+        raise ValueError(f"Both Python and R failed for {distribution}: {str(e)}")
 

@@ -78,6 +78,68 @@ fit_gompertz <- function(req) {
   )
 }
 
+#* Fit any parametric survival model using flexsurv
+#* @post /fit-parametric
+#* @serializer json
+fit_parametric <- function(req) {
+  body <- jsonlite::fromJSON(rawToChar(req$body))
+  time <- body$time
+  event <- body$event
+  distribution <- body$distribution
+
+  # Map distribution names to flexsurv names
+  dist_map <- list(
+    "exponential" = "exp",
+    "weibull" = "weibull",
+    "log-normal" = "lnorm",
+    "lognormal" = "lnorm",
+    "log-logistic" = "llogis",
+    "loglogistic" = "llogis",
+    "gompertz" = "gompertz",
+    "generalized-gamma" = "gengamma",
+    "gamma" = "gamma"
+  )
+
+  flexsurv_dist <- dist_map[[distribution]]
+  if (is.null(flexsurv_dist)) {
+    return(list(error = paste("Unknown distribution:", distribution)))
+  }
+
+  tryCatch(
+    {
+      surv_obj <- Surv(time = time, event = event)
+      fit <- flexsurvreg(surv_obj ~ 1, dist = flexsurv_dist)
+
+      # Extract parameters
+      params <- coef(fit)
+      aic <- AIC(fit)
+      bic <- BIC(fit)
+      log_lik <- logLik(fit)[1]
+
+      # Get survival predictions at 60 and 120 months
+      pred_60 <- summary(fit, type = "survival", t = 60)[[1]]$est
+      pred_120 <- summary(fit, type = "survival", t = 120)[[1]]$est
+
+      result <- list(
+        distribution = distribution,
+        parameters = as.list(params),
+        aic = as.numeric(aic),
+        bic = as.numeric(bic),
+        log_likelihood = as.numeric(log_lik),
+        predictions = list(
+          "60" = as.numeric(pred_60),
+          "120" = as.numeric(pred_120)
+        )
+      )
+
+      return(result)
+    },
+    error = function(e) {
+      return(list(error = e$message))
+    }
+  )
+}
+
 #* Fit Royston-Parmar flexible parametric spline model
 #* @post /fit-rp-spline
 #* @serializer json
