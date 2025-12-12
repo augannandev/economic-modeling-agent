@@ -66,6 +66,13 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'base64enc' %in% rownames(installed.packages())) stop('base64enc installation failed'); \
     cat('✓ base64enc installed\n')"
 
+# Update Matrix package (required >= 1.6.0 by MatrixModels)
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    cat('Updating Matrix package...\n'); \
+    install.packages('Matrix', quiet=FALSE); \
+    stopifnot('Matrix' %in% rownames(installed.packages())); \
+    cat('✓ Matrix updated\n')"
+
 # Install SparseM and quantreg (dependencies for survminer chain)
 RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
     cat('Installing SparseM...\n'); \
