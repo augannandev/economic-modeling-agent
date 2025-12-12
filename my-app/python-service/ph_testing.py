@@ -265,6 +265,7 @@ def generate_ph_diagnostic_plots(chemo_df: pd.DataFrame, pembro_df: pd.DataFrame
         # Try to use R service first
         r_service_url = os.environ.get('R_SERVICE_URL', 'http://localhost:8001')
         r_success = False
+        r_plot_data = None
         
         try:
             # Prepare data for R
@@ -287,12 +288,22 @@ def generate_ph_diagnostic_plots(chemo_df: pd.DataFrame, pembro_df: pd.DataFrame
                 if 'error' not in r_result:
                     residuals = np.array(r_result['residuals'])
                     times = np.array(r_result['times'])
+                    smooth_times = np.array(r_result.get('smooth_times', []))
+                    smooth_values = np.array(r_result.get('smooth_values', []))
+                    ci_lower = np.array(r_result.get('ci_lower', []))
+                    ci_upper = np.array(r_result.get('ci_upper', []))
+                    p_value = float(r_result.get('p_value', 0.05))
                     
-                    # Create plot data
-                    plot_data = pd.DataFrame({
-                        'resid': residuals,
-                        'time': times
-                    })
+                    # Store R service data for plotting
+                    r_plot_data = {
+                        'residuals': residuals,
+                        'times': times,
+                        'smooth_times': smooth_times,
+                        'smooth_values': smooth_values,
+                        'ci_lower': ci_lower,
+                        'ci_upper': ci_upper,
+                        'p_value': p_value
+                    }
                     
                     r_success = True
                     print("Successfully used R service for Schoenfeld residuals")
@@ -322,40 +333,85 @@ def generate_ph_diagnostic_plots(chemo_df: pd.DataFrame, pembro_df: pd.DataFrame
                 'time': simple_df.loc[treatment_resid.index, 'time']
             })
         
-        # Plotting (Common for both R and Python data)
-        fig, ax = plt.subplots(figsize=(10, 6))
+        # Plotting - Match reference image style exactly
+        fig, ax = plt.subplots(figsize=(12, 6))
         
-        # Scatter plot
-        ax.scatter(plot_data['time'], plot_data['resid'], alpha=0.6, s=15, label='Residuals')
-        
-        # Add LOESS trend line
-        # Try using statsmodels if available, else simple rolling mean
-        try:
-            from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
-            # lowess returns (x, y) sorted by x
-            smoothed = lowess(plot_data['resid'], plot_data['time'], frac=0.4)
-            ax.plot(smoothed[:, 0], smoothed[:, 1], color='red', linewidth=3, label='LOESS Trend')
-        except ImportError:
-            # Fallback: Rolling mean
-            plot_data_sorted = plot_data.sort_values('time')
-            rolling = plot_data_sorted['resid'].rolling(window=20, center=True, min_periods=5).mean()
-            ax.plot(plot_data_sorted['time'], rolling, color='red', linewidth=3, label='Rolling Mean')
-            print("Warning: statsmodels not found, using rolling mean for Schoenfeld plot")
+        if r_success and r_plot_data is not None:
+            # Use R service data with smoothed values and confidence intervals
+            residuals = r_plot_data['residuals']
+            times = r_plot_data['times']
+            smooth_times = r_plot_data['smooth_times']
+            smooth_values = r_plot_data['smooth_values']
+            ci_lower = r_plot_data['ci_lower']
+            ci_upper = r_plot_data['ci_upper']
             
-        # Add zero line (reference)
-        ax.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+            # Scatter plot of individual residuals (open circles)
+            ax.scatter(times, residuals, alpha=0.4, s=15, color='black', 
+                      marker='o', edgecolors='none', zorder=1)
+            
+            # Horizontal reference line at zero (dotted)
+            ax.axhline(y=0, color='black', linestyle=':', linewidth=1.5, alpha=0.7, zorder=2)
+            
+            # Confidence intervals (dashed lines) if available
+            if len(smooth_times) > 0 and len(ci_lower) > 0 and len(ci_upper) > 0:
+                ax.plot(smooth_times, ci_lower, 'k--', linewidth=1, alpha=0.5, zorder=3)
+                ax.plot(smooth_times, ci_upper, 'k--', linewidth=1, alpha=0.5, zorder=3)
+            
+            # Smoothed trend line (solid black)
+            if len(smooth_times) > 0 and len(smooth_values) > 0:
+                ax.plot(smooth_times, smooth_values, 'k-', linewidth=2, zorder=4)
+            
+            max_time = float(np.max(times))
+        else:
+            # Fallback: Use Python-calculated data
+            # Scatter plot
+            ax.scatter(plot_data['time'], plot_data['resid'], alpha=0.4, s=15, 
+                      color='black', marker='o', edgecolors='none', zorder=1)
+            
+            # Horizontal reference line at zero (dotted)
+            ax.axhline(y=0, color='black', linestyle=':', linewidth=1.5, alpha=0.7, zorder=2)
+            
+            # Add LOESS trend line
+            try:
+                from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
+                smoothed = lowess(plot_data['resid'], plot_data['time'], frac=0.4)
+                ax.plot(smoothed[:, 0], smoothed[:, 1], 'k-', linewidth=2, zorder=4)
+            except ImportError:
+                # Fallback: Rolling mean
+                plot_data_sorted = plot_data.sort_values('time')
+                rolling = plot_data_sorted['resid'].rolling(window=20, center=True, min_periods=5).mean()
+                ax.plot(plot_data_sorted['time'], rolling, 'k-', linewidth=2, zorder=4)
+                print("Warning: statsmodels not found, using rolling mean for Schoenfeld plot")
+            
+            max_time = float(plot_data['time'].max())
         
+        # Log scale x-axis with specific tick marks matching reference
         ax.set_xscale('log')
-        ax.set_xlabel('Time (log scale)', fontsize=12)
-        ax.set_ylabel('Scaled Schoenfeld Residuals', fontsize=12)
-        ax.set_title('Schoenfeld Residuals (Treatment)\nFlat line = PH holds', fontsize=14)
-        ax.legend()
-        ax.grid(True, alpha=0.3, which='both')
+        ax.set_xlim(left=0.3, right=max_time * 1.5)
+        ax.set_xticks([0.5, 1, 2, 5, 10, 20, 50])
+        ax.set_xticklabels(['0.5', '1.0', '2.0', '5.0', '10.0', '20.0', '50.0'])
+        
+        # Y-axis label matching reference style
+        ax.set_ylabel('Beta(t) for TRT01PSOC', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+        
+        # Title matching reference format
+        # Try to infer endpoint type from data context (default to OS)
+        endpoint_type = 'OS'  # Default, could be enhanced to detect from data source
+        title = f'Figure 30. Schoenfeld residuals plot of {endpoint_type} for pembrolizumab and SOC based on KEYNOTE-024'
+        ax.set_title(title, fontsize=13, fontweight='bold', pad=10)
+        
+        # Grid styling matching reference
+        ax.grid(True, alpha=0.3, which='both', linestyle='-', linewidth=0.5)
+        ax.grid(True, alpha=0.2, which='minor', linestyle=':', linewidth=0.5)
+        
+        # Remove legend (reference plot doesn't show one)
+        # ax.legend()  # Commented out to match reference
         
         plt.tight_layout()
         
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=150)
+        plt.savefig(buf, format='png', dpi=300, bbox_inches='tight')
         buf.seek(0)
         plots['schoenfeld_residuals'] = base64.b64encode(buf.read()).decode('utf-8')
         plt.close(fig)
