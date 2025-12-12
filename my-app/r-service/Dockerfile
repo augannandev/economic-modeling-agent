@@ -66,6 +66,19 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'base64enc' %in% rownames(installed.packages())) stop('base64enc installation failed'); \
     cat('✓ base64enc installed\n')"
 
+# Install SparseM and quantreg (dependencies for survminer chain)
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    cat('Installing SparseM...\n'); \
+    install.packages('SparseM', quiet=FALSE); \
+    stopifnot('SparseM' %in% rownames(installed.packages())); \
+    cat('✓ SparseM installed\n')"
+
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    cat('Installing quantreg...\n'); \
+    install.packages('quantreg', quiet=FALSE); \
+    stopifnot('quantreg' %in% rownames(installed.packages())); \
+    cat('✓ quantreg installed\n')"
+
 # Install survminer (required by IPDfromKM)
 RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
     cat('Installing survminer (this may take a few minutes)...\n'); \
