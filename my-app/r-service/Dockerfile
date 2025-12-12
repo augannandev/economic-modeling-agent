@@ -48,6 +48,25 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'base64enc' %in% rownames(installed.packages())) stop('base64enc installation failed'); \
     cat('✓ base64enc installed\n')"
 
+# Install devtools and zoo (required for IPDfromKM)
+RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    cat('Installing devtools and zoo...\n'); \
+    install.packages(c('devtools', 'zoo'), repos='https://cloud.r-project.org', quiet = FALSE); \
+    if (!all(c('devtools', 'zoo') %in% rownames(installed.packages()))) stop('devtools/zoo installation failed'); \
+    cat('✓ devtools and zoo installed\n')"
+
+# Install IPDfromKM
+RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    cat('Installing IPDfromKM from GitHub...\n'); \
+    tryCatch({ \
+    devtools::install_github('NaLiuStat/IPDfromKM', upgrade='never', quiet = FALSE); \
+    }, error = function(e) { \
+    cat('ERROR installing IPDfromKM:', e$message, '\n'); \
+    stop('IPDfromKM installation failed'); \
+    }); \
+    if (!'IPDfromKM' %in% rownames(installed.packages())) stop('IPDfromKM not found after installation'); \
+    cat('✓ IPDfromKM installed\n')"
+
 # Install flexsurv (required by survival_models.R)
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     options(timeout = 600); \
@@ -69,7 +88,7 @@ COPY . .
 
 # Final verification - try to load packages
 RUN Rscript -e "cat('Final package verification...\n'); \
-    pkgs <- c('plumber', 'survival', 'jsonlite', 'base64enc', 'flexsurv', 'rstpm2'); \
+    pkgs <- c('plumber', 'survival', 'jsonlite', 'base64enc', 'flexsurv', 'rstpm2', 'IPDfromKM'); \
     installed <- rownames(installed.packages()); \
     missing <- pkgs[!pkgs %in% installed]; \
     if (length(missing) > 0) { \
