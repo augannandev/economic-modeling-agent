@@ -59,20 +59,12 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'base64enc' %in% rownames(installed.packages())) stop('base64enc installation failed'); \
     cat('✓ base64enc installed\n')"
 
-# Install survminer (optional, for enhanced KM plots)
-RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
-    cat('Installing survminer (optional, for enhanced plots)...\n'); \
-    tryCatch({ \
-    install.packages('survminer', repos='https://cloud.r-project.org', dependencies = FALSE, quiet = FALSE); \
-    if ('survminer' %in% rownames(installed.packages())) { \
-    cat('✓ survminer installed\n'); \
-    } else { \
-    cat('⚠️  survminer installation failed (optional package)\n'); \
-    } \
-    }, error = function(e) { \
-    cat('⚠️  survminer installation failed (optional):', e\$message, '\n'); \
-    cat('Service will use base R plotting instead\n'); \
-    })"
+# Install survminer (required by IPDfromKM)
+RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
+    cat('Installing survminer (this may take a few minutes)...\n'); \
+    install.packages('survminer', quiet=FALSE); \
+    stopifnot('survminer' %in% rownames(installed.packages())); \
+    cat('✓ survminer installed\n')"
 
 # Install zoo (lightweight, required by IPDfromKM)
 RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
