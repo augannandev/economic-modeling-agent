@@ -817,6 +817,208 @@ async def ipd_preview(endpoint: str = "OS"):
             "error": str(e)
         }
 
+@app.get("/ipd-data")
+async def ipd_data(endpoint: str = "OS", projectId: str = None):
+    """
+    Get full IPD data for a given endpoint type, including records, statistics, and KM plot.
+    
+    Returns:
+    - records: Array of IPD records with patient_id, time, event, arm
+    - statistics: N, events, median survival, CI per arm
+    - km_plot_base64: KM plot from R service (or fallback to Python)
+    """
+    try:
+        import os
+        from pathlib import Path
+        import pandas as pd
+        import numpy as np
+        from lifelines import KaplanMeierFitter
+        
+        # Data directory from environment or fallback
+        demo_dir = Path(__file__).parent / "demo_data"
+        
+        # Track data source
+        source = "demo"
+        chemo_df = None
+        pembro_df = None
+        
+        # TODO: If projectId is provided, fetch from Supabase
+        # For now, use demo data
+        
+        # Load demo data
+        chemo_path = demo_dir / f"ipd_EndpointType.{endpoint}_Chemotherapy.parquet"
+        pembro_path = demo_dir / f"ipd_EndpointType.{endpoint}_Pembrolizumab.parquet"
+        
+        if chemo_path.exists():
+            chemo_df = pd.read_parquet(chemo_path)
+        
+        if pembro_path.exists():
+            pembro_df = pd.read_parquet(pembro_path)
+        
+        # Check if we have data
+        if chemo_df is None and pembro_df is None:
+            return {
+                "endpoint": endpoint,
+                "source": source,
+                "records": [],
+                "statistics": {
+                    "pembro": {"n": 0, "events": 0, "median": None, "ci_lower": None, "ci_upper": None, "follow_up_range": "N/A"},
+                    "chemo": {"n": 0, "events": 0, "median": None, "ci_lower": None, "ci_upper": None, "follow_up_range": "N/A"}
+                },
+                "km_plot_base64": None,
+                "available": False
+            }
+        
+        # Combine and format records
+        records = []
+        
+        if chemo_df is not None:
+            for idx, row in chemo_df.iterrows():
+                records.append({
+                    "patient_id": int(row.get('patient_id', idx + 1)),
+                    "time": float(row['time']),
+                    "event": int(row['event']),
+                    "arm": "Chemotherapy"
+                })
+        
+        if pembro_df is not None:
+            for idx, row in pembro_df.iterrows():
+                records.append({
+                    "patient_id": int(row.get('patient_id', idx + 1)),
+                    "time": float(row['time']),
+                    "event": int(row['event']),
+                    "arm": "Pembrolizumab"
+                })
+        
+        # Calculate statistics
+        def calc_stats(df):
+            if df is None or len(df) == 0:
+                return {"n": 0, "events": 0, "median": None, "ci_lower": None, "ci_upper": None, "follow_up_range": "N/A"}
+            
+            n = len(df)
+            events = int(df['event'].sum())
+            
+            kmf = KaplanMeierFitter()
+            kmf.fit(df['time'], df['event'])
+            
+            median_survival = kmf.median_survival_time_
+            ci = kmf.confidence_interval_median_survival_time_
+            
+            median_val = float(median_survival) if not np.isinf(median_survival) else None
+            ci_lower = float(ci.iloc[0, 0]) if not np.isnan(ci.iloc[0, 0]) else None
+            ci_upper = float(ci.iloc[0, 1]) if not np.isnan(ci.iloc[0, 1]) else None
+            
+            follow_up = f"{df['time'].min():.1f} - {df['time'].max():.1f} mo"
+            
+            return {
+                "n": n,
+                "events": events,
+                "median": median_val,
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper,
+                "follow_up_range": follow_up
+            }
+        
+        pembro_stats = calc_stats(pembro_df)
+        chemo_stats = calc_stats(chemo_df)
+        
+        # Generate KM plot using R service (or fallback to Python)
+        km_plot_base64 = None
+        
+        try:
+            from ipd_plotting import plot_km_from_ipd_r
+            
+            chemo_time = chemo_df['time'].tolist() if chemo_df is not None else []
+            chemo_event = chemo_df['event'].astype(int).tolist() if chemo_df is not None else []
+            pembro_time = pembro_df['time'].tolist() if pembro_df is not None else []
+            pembro_event = pembro_df['event'].astype(int).tolist() if pembro_df is not None else []
+            
+            r_result = plot_km_from_ipd_r(
+                chemo_time=chemo_time,
+                chemo_event=chemo_event,
+                pembro_time=pembro_time,
+                pembro_event=pembro_event,
+                endpoint_type=endpoint
+            )
+            
+            if r_result and r_result.get('plot_base64'):
+                km_plot_base64 = r_result['plot_base64']
+                print(f"[IPD Data] Generated KM plot using R service")
+        except Exception as r_err:
+            print(f"[IPD Data] R service plot failed: {r_err}, falling back to Python")
+        
+        # Fallback to Python matplotlib if R failed
+        if km_plot_base64 is None:
+            import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use('Agg')
+            import base64
+            from io import BytesIO
+            
+            fig, ax = plt.subplots(figsize=(10, 7))
+            
+            max_time = max(
+                pembro_df['time'].max() if pembro_df is not None else 0,
+                chemo_df['time'].max() if chemo_df is not None else 0
+            )
+            ax.set_xlim(0, max_time * 1.1)
+            ax.set_ylim(0, 1.05)
+            ax.set_xlabel("Time (months)", fontsize=12)
+            ax.set_ylabel("Survival Probability", fontsize=12)
+            ax.set_title(f"{endpoint} - Reconstructed IPD Kaplan-Meier Curves", fontsize=14)
+            ax.grid(True, alpha=0.3)
+            
+            if pembro_df is not None and len(pembro_df) > 0:
+                kmf_pembro = KaplanMeierFitter()
+                kmf_pembro.fit(pembro_df['time'], pembro_df['event'], label='Pembrolizumab')
+                kmf_pembro.plot_survival_function(ax=ax, ci_show=True, color='#FF7F0E', linewidth=2)
+            
+            if chemo_df is not None and len(chemo_df) > 0:
+                kmf_chemo = KaplanMeierFitter()
+                kmf_chemo.fit(chemo_df['time'], chemo_df['event'], label='Chemotherapy')
+                kmf_chemo.plot_survival_function(ax=ax, ci_show=True, color='#1F77B4', linewidth=2)
+            
+            ax.legend(loc='lower left', fontsize=11)
+            ax.text(0.98, 0.02, f"Source: {source.title()} Data", 
+                    transform=ax.transAxes, fontsize=9, alpha=0.5, ha='right')
+            
+            plt.tight_layout()
+            
+            buffer = BytesIO()
+            fig.savefig(buffer, format='png', dpi=120, bbox_inches='tight')
+            buffer.seek(0)
+            km_plot_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+            plt.close(fig)
+        
+        return {
+            "endpoint": endpoint,
+            "source": source,
+            "records": records,
+            "statistics": {
+                "pembro": pembro_stats,
+                "chemo": chemo_stats
+            },
+            "km_plot_base64": km_plot_base64,
+            "available": True
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"[IPD Data] Error: {e}\n{traceback.format_exc()}")
+        return {
+            "endpoint": endpoint,
+            "source": "error",
+            "records": [],
+            "statistics": {
+                "pembro": {"n": 0, "events": 0, "median": None, "ci_lower": None, "ci_upper": None, "follow_up_range": "N/A"},
+                "chemo": {"n": 0, "events": 0, "median": None, "ci_lower": None, "ci_upper": None, "follow_up_range": "N/A"}
+            },
+            "km_plot_base64": None,
+            "available": False,
+            "error": str(e)
+        }
+
+
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", "8000"))

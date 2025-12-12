@@ -1008,6 +1008,89 @@ survivalRoutes.get('/analyses/:id/chat/stream', async (c) => {
   });
 });
 
+// Get IPD data for an analysis (includes records, statistics, and KM plot)
+survivalRoutes.get('/analyses/:id/ipd-data', async (c) => {
+  try {
+    const user = c.get('user');
+    const analysisId = c.req.param('id');
+    const db = await getDatabase(getDatabaseUrl()!);
+
+    // Verify analysis belongs to user
+    const [analysis] = await db.select()
+      .from(analyses)
+      .where(eq(analyses.id, analysisId));
+
+    if (!analysis || analysis.user_id !== user.id) {
+      return c.json({ error: 'Analysis not found' }, 404);
+    }
+
+    // Get endpoint type and project ID from analysis parameters
+    const params = analysis.parameters as { endpointType?: string; projectId?: string } | null;
+    const endpointType = params?.endpointType || 'OS';
+    const projectId = params?.projectId;
+
+    // Get Python service URL
+    const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+    
+    console.log(`[IPD Data] Fetching ${endpointType} IPD data for analysis ${analysisId}${projectId ? ` (project ${projectId})` : ' (demo data)'}`);
+
+    // Build URL with parameters
+    let ipdUrl = `${pythonServiceUrl}/ipd-data?endpoint=${endpointType}`;
+    if (projectId) {
+      ipdUrl += `&projectId=${projectId}`;
+    }
+
+    // Call Python service for IPD data
+    const response = await fetch(ipdUrl);
+
+    if (!response.ok) {
+      console.log(`[IPD Data] Python service returned ${response.status}`);
+      return c.json({
+        endpoint: endpointType,
+        source: projectId ? 'project' : 'demo',
+        records: [],
+        statistics: {
+          pembro: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' },
+          chemo: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' }
+        },
+        km_plot_base64: null,
+        available: false
+      });
+    }
+
+    const data = await response.json() as Record<string, unknown>;
+
+    // Get project name if applicable
+    let projectName: string | undefined = undefined;
+    if (projectId && isSupabaseConfigured()) {
+      try {
+        const { getProject } = await import('./lib/supabase');
+        const projectResult = await getProject(projectId);
+        if (projectResult.data && projectResult.data.length > 0) {
+          projectName = projectResult.data[0].name;
+        }
+      } catch (err) {
+        console.warn('[IPD Data] Failed to fetch project name:', err);
+      }
+    }
+
+    return c.json({
+      ...data,
+      endpoint: endpointType,
+      source: projectId ? 'project' : 'demo',
+      projectId,
+      projectName,
+      available: true
+    });
+  } catch (error) {
+    console.error('[IPD Data] Error:', error);
+    return c.json({
+      error: 'Failed to fetch IPD data',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
 // Get IPD preview data (for when no analysis has been run)
 survivalRoutes.get('/ipd-preview', async (c) => {
   try {

@@ -15,7 +15,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { ChatSidebar } from '@/components/chat';
-import { FinalDecisionPanel, ReproducibilityTab, IPDPreview } from '@/components/survival';
+import { FinalDecisionPanel, ReproducibilityTab, IPDPreview, IPDDataTab } from '@/components/survival';
 import { 
   CheckCircle2, 
   Circle, 
@@ -555,6 +555,7 @@ export function SurvivalAnalysis() {
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                   <TabsList>
                     <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="ipd-data">IPD Data</TabsTrigger>
                     <TabsTrigger value="ph-tests">PH Tests</TabsTrigger>
                     <TabsTrigger value="models">Models</TabsTrigger>
                     <TabsTrigger value="synthesis">Synthesis</TabsTrigger>
@@ -569,6 +570,10 @@ export function SurvivalAnalysis() {
 
                   <TabsContent value="overview" className="space-y-4">
                     <OverviewTab analysis={selectedAnalysis} />
+                  </TabsContent>
+
+                  <TabsContent value="ipd-data" className="space-y-4">
+                    <IPDDataTab analysisId={selectedAnalysis.id} />
                   </TabsContent>
 
                   <TabsContent value="ph-tests" className="space-y-4">
