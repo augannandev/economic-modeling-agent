@@ -964,27 +964,27 @@ async def ipd_data(endpoint: str = "OS", projectId: str = None):
         for arm_name, df in arm_data.items():
             statistics[arm_name] = calc_stats(df)
         
-        # Generate KM plot using R service (or fallback to Python)
+        # Generate KM plot using R service (default) with fallback to Python
         km_plot_base64 = None
         
         try:
-            from ipd_plotting import plot_km_from_ipd_r
+            from ipd_plotting import plot_km_dynamic_r
             
-            # For R service, we need to pass data in expected format
-            # Currently R service expects chemo/pembro, so only use if we have those exact arms
-            if 'Chemotherapy' in arm_data and 'Pembrolizumab' in arm_data:
-                chemo_df = arm_data['Chemotherapy']
-                pembro_df = arm_data['Pembrolizumab']
-                r_result = plot_km_from_ipd_r(
-                    chemo_time=chemo_df['time'].tolist(),
-                    chemo_event=chemo_df['event'].astype(int).tolist(),
-                    pembro_time=pembro_df['time'].tolist(),
-                    pembro_event=pembro_df['event'].astype(int).tolist(),
-                    endpoint_type=endpoint
-                )
-                if r_result and r_result.get('plot_base64'):
-                    km_plot_base64 = r_result['plot_base64']
-                    print(f"[IPD Data] Generated KM plot using R service")
+            # Build arms list for R service (dynamic - works with any arm names)
+            r_arms = []
+            for idx, (arm_name, df) in enumerate(arm_data.items()):
+                r_arms.append({
+                    'name': arm_name,
+                    'time': df['time'].tolist(),
+                    'event': df['event'].astype(int).tolist(),
+                    'color': ARM_COLORS[idx % len(ARM_COLORS)]
+                })
+            
+            r_result = plot_km_dynamic_r(arms=r_arms, endpoint_type=endpoint)
+            
+            if r_result and r_result.get('plot_base64'):
+                km_plot_base64 = r_result['plot_base64']
+                print(f"[IPD Data] Generated KM plot using R service for {len(r_arms)} arms")
         except Exception as r_err:
             print(f"[IPD Data] R service plot failed: {r_err}, falling back to Python")
         

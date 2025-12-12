@@ -558,7 +558,7 @@ plot_ipd_reconstruction <- function(req) {
   )
 }
 
-#* Plot combined KM curves from IPD data
+#* Plot combined KM curves from IPD data (legacy endpoint for chemo/pembro)
 #* @post /plot-km-from-ipd
 #* @serializer json
 plot_km_from_ipd <- function(req) {
@@ -670,6 +670,154 @@ plot_km_from_ipd <- function(req) {
     },
     error = function(e) {
       error_msg <- paste("Error in plot_km_from_ipd:", e$message)
+      if (!is.null(e$call)) {
+        error_msg <- paste(error_msg, "\nCall:", deparse(e$call))
+      }
+      return(list(success = FALSE, error = error_msg))
+    }
+  )
+}
+
+#* Plot combined KM curves from IPD data with dynamic arm names
+#* @post /plot-km-dynamic
+#* @serializer json
+plot_km_dynamic <- function(req) {
+  tryCatch(
+    {
+      # Parse JSON body
+      if (is.raw(req$body)) {
+        body <- jsonlite::fromJSON(rawToChar(req$body))
+      } else if (is.character(req$body)) {
+        body <- jsonlite::fromJSON(req$body)
+      } else {
+        body <- req$body
+      }
+
+      # Extract parameters
+      # arms: list of {name, time, event, color}
+      arms_data <- body$arms
+      endpoint_type <- if (is.null(body$endpoint_type)) "OS" else body$endpoint_type
+
+      if (is.null(arms_data) || length(arms_data) == 0) {
+        return(list(success = FALSE, error = "No arm data provided"))
+      }
+
+      # Color palette (fallback if not provided)
+      default_colors <- c("#FF7F0E", "#1F77B4", "#2CA02C", "#D62728", "#9467BD",
+                          "#8C564B", "#E377C2", "#7F7F7F", "#BCBD22", "#17BECF")
+
+      # Build combined data frame from all arms
+      all_times <- c()
+      all_events <- c()
+      all_arms <- c()
+      arm_names <- c()
+      arm_colors <- c()
+
+      for (i in seq_along(arms_data)) {
+        arm <- arms_data[[i]]
+        arm_name <- arm$name
+        arm_time <- arm$time
+        arm_event <- arm$event
+        arm_color <- if (is.null(arm$color)) default_colors[((i - 1) %% length(default_colors)) + 1] else arm$color
+
+        all_times <- c(all_times, arm_time)
+        all_events <- c(all_events, arm_event)
+        all_arms <- c(all_arms, rep(arm_name, length(arm_time)))
+        arm_names <- c(arm_names, arm_name)
+        arm_colors <- c(arm_colors, arm_color)
+      }
+
+      # Create data frame
+      all_data <- data.frame(
+        time = all_times,
+        event = all_events,
+        arm = factor(all_arms, levels = arm_names)
+      )
+
+      # Fit KM curves
+      surv_obj <- Surv(time = all_data$time, event = all_data$event) # nolint
+      fit <- survfit(surv_obj ~ arm, data = all_data)
+
+      # Calculate log-rank test p-value (only if 2+ arms)
+      p_value <- NA
+      if (length(arm_names) >= 2) {
+        logrank_test <- survdiff(surv_obj ~ arm, data = all_data)
+        p_value <- 1 - pchisq(logrank_test$chisq, length(logrank_test$n) - 1)
+      }
+
+      # Create plot
+      temp_file <- tempfile(fileext = ".png")
+      png(temp_file, width = 10, height = 7, units = "in", res = 300)
+
+      # Try to use survminer for enhanced plots
+      has_survminer <- requireNamespace("survminer", quietly = TRUE)
+
+      if (has_survminer) {
+        library(survminer)
+        p <- ggsurvplot(
+          fit,
+          data = all_data,
+          risk.table = TRUE,
+          pval = !is.na(p_value),
+          pval.coord = c(0, 0.1),
+          conf.int = TRUE,
+          xlab = "Time (Months)",
+          ylab = "Survival Probability",
+          title = paste0("Kaplan-Meier Curves from Reconstructed IPD (", endpoint_type, ")"),
+          palette = arm_colors,
+          ggtheme = ggplot2::theme_minimal(), # nolint
+          risk.table.height = 0.25,
+          fontsize = 4
+        )
+        print(p)
+      } else {
+        # Fallback to base R plot
+        par(mar = c(5, 5, 4, 2) + 0.1)
+        plot(fit,
+          col = arm_colors,
+          lwd = 2,
+          xlab = "Time (Months)",
+          ylab = "Survival Probability",
+          main = paste0("Kaplan-Meier Curves from Reconstructed IPD (", endpoint_type, ")"),
+          cex.lab = 1.2,
+          cex.main = 1.3,
+          font.lab = 2
+        )
+        legend("topright",
+          legend = arm_names,
+          col = arm_colors,
+          lwd = 2,
+          bty = "n",
+          cex = 1.1
+        )
+        if (!is.na(p_value)) {
+          text(
+            x = max(all_data$time) * 0.7, y = 0.2,
+            labels = paste0("Log-rank p = ", format.pval(p_value, digits = 3)),
+            cex = 1.0
+          )
+        }
+        grid(col = "gray90", lty = "dotted")
+      }
+
+      dev.off()
+
+      # Read file and convert to base64
+      plot_data <- readBin(temp_file, "raw", file.info(temp_file)$size)
+      plot_base64 <- base64enc::base64encode(plot_data)
+
+      # Clean up temp file
+      unlink(temp_file)
+
+      return(list(
+        success = TRUE,
+        plot_base64 = plot_base64,
+        p_value = if (is.na(p_value)) NULL else as.numeric(p_value),
+        arms = arm_names
+      ))
+    },
+    error = function(e) {
+      error_msg <- paste("Error in plot_km_dynamic:", e$message)
       if (!is.null(e$call)) {
         error_msg <- paste(error_msg, "\nCall:", deparse(e$call))
       }

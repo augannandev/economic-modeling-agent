@@ -98,7 +98,7 @@ def plot_km_from_ipd_r(
     pembro_event: List[int],
     endpoint_type: str = "OS"
 ) -> Optional[Dict]:
-    """Generate combined KM plot from IPD data using R service.
+    """Generate combined KM plot from IPD data using R service (legacy endpoint).
     
     Args:
         chemo_time: Chemotherapy arm time values
@@ -167,6 +167,88 @@ def plot_km_from_ipd_r(
         return {
             'plot_base64': plot_base64,
             'p_value': p_value
+        }
+        
+    except requests.exceptions.RequestException as e:
+        print(f"[IPDPlotting] Request error: {e}")
+        return None
+    except Exception as e:
+        print(f"[IPDPlotting] Unexpected error: {e}")
+        return None
+
+
+def plot_km_dynamic_r(
+    arms: List[Dict],
+    endpoint_type: str = "OS"
+) -> Optional[Dict]:
+    """Generate combined KM plot from IPD data with dynamic arm names using R service.
+    
+    Args:
+        arms: List of arm data dicts, each with:
+            - name: Arm name (e.g., "Treatment A", "Placebo")
+            - time: List of time values
+            - event: List of event indicators (1=event, 0=censored)
+            - color: Optional hex color (e.g., "#FF7F0E")
+        endpoint_type: Type of endpoint (OS, PFS, etc.)
+        
+    Returns:
+        Dict with 'plot_base64', 'p_value', and 'arms', or None if failed
+    """
+    r_service_url = os.environ.get('R_SERVICE_URL', 'http://localhost:8001')
+    
+    try:
+        # Quick health check
+        try:
+            health_check = requests.get(f"{r_service_url}/", timeout=2)
+            if not health_check.ok:
+                print(f"[IPDPlotting] R service not available at {r_service_url}")
+                return None
+        except requests.exceptions.RequestException:
+            print(f"[IPDPlotting] R service not available at {r_service_url}")
+            return None
+        
+        # Prepare payload
+        payload = {
+            'arms': arms,
+            'endpoint_type': endpoint_type
+        }
+        
+        # Call R service
+        response = requests.post(
+            f"{r_service_url}/plot-km-dynamic",
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            print(f"[IPDPlotting] R service returned status {response.status_code}")
+            print(f"   Response: {response.text[:500]}")
+            return None
+        
+        result = response.json()
+        
+        # Handle Plumber's list serialization
+        success = result.get('success')
+        if isinstance(success, list):
+            success = success[0] if success else False
+        
+        if not success:
+            error = result.get('error', 'Unknown error')
+            print(f"[IPDPlotting] R service error: {error}")
+            return None
+        
+        plot_base64 = result.get('plot_base64')
+        if isinstance(plot_base64, list):
+            plot_base64 = plot_base64[0] if plot_base64 else None
+        
+        p_value = result.get('p_value')
+        if isinstance(p_value, list):
+            p_value = p_value[0] if p_value else None
+        
+        return {
+            'plot_base64': plot_base64,
+            'p_value': p_value,
+            'arms': result.get('arms', [])
         }
         
     except requests.exceptions.RequestException as e:
