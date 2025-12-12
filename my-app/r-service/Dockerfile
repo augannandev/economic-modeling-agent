@@ -3,8 +3,8 @@ FROM r-base:4.3.0
 WORKDIR /app
 
 # Install system dependencies (including libsodium-dev for plumber dependency)
-# Also include libraries needed for remotes and graphics packages
-RUN apt-get update && apt-get install -y \
+# Also include libraries needed for remotes, graphics packages, and survminer deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
@@ -20,6 +20,13 @@ RUN apt-get update && apt-get install -y \
     libpango1.0-dev \
     curl \
     git \
+    build-essential \
+    gfortran \
+    cmake \
+    pkg-config \
+    libnlopt-dev \
+    liblapack-dev \
+    libblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install R packages with explicit error checking
