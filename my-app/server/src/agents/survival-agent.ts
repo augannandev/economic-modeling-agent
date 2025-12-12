@@ -1,5 +1,11 @@
 // LangGraph imports removed - using sequential workflow for now
 import { loadPseudoIPD } from '../tools/data-loader';
+import { readFileSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 import { testProportionalHazardsTool } from '../tools/ph-tester';
 import { fitKMCurvesTool } from '../tools/km-fitter';
 import { fitOnePieceModelTool } from '../tools/one-piece-fitter';
@@ -10,13 +16,13 @@ import { assessWithVisionLLM } from '../tools/vision-analyzer';
 import { assessWithReasoningLLM, assessPHAssumption } from '../tools/reasoning-analyzer';
 import { synthesizeCrossModel } from '../tools/synthesis-generator';
 import { getDatabase } from '../lib/db';
-import { getDatabaseUrl } from '../lib/env';
+import { getDatabaseUrl, getDataDirectory } from '../lib/env';
 import { analyses, models, visionAssessments, reasoningAssessments, plots, phTests, synthesisReports, tokenUsage } from '../schema/analyses';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { Distribution } from '../tools/one-piece-fitter';
-import { 
-  isSupabaseConfigured, 
+import {
+  isSupabaseConfigured,
   createAnalysis as createSupabaseAnalysis,
   updateAnalysis as updateSupabaseAnalysis,
   saveModel as saveSupabaseModel,
@@ -92,19 +98,19 @@ function mapVisionToDbFormat(vision: any): {
     vision.observations?.mid?.fit_quality,
     vision.observations?.late?.fit_quality,
   ].filter(Boolean).join('; ') || '';
-  
+
   // Build long-term observations from extrapolation
   const longTermObs = [
     vision.observations?.extrapolation?.trajectory,
     vision.observations?.extrapolation?.plausibility,
   ].filter(Boolean).join('; ') || '';
-  
+
   // Concerns from red_flags and extrapolation concerns
   const concerns = [
     ...(vision.red_flags || []),
     ...(vision.observations?.extrapolation?.concerns || []),
   ].join('; ') || '';
-  
+
   return {
     short_term_observations: shortTermObs,
     long_term_observations: longTermObs,
@@ -411,7 +417,7 @@ async function fitPiecewiseModels(state: SurvivalAnalysisState): Promise<Partial
   const db = await getDatabase(getDatabaseUrl()!);
   const fittedModels = [...(state.fitted_models || [])];
   let modelOrder = fittedModels.length + 1;
-  
+
   // Store cutpoint results for synthesis
   const cutpointResults: { chemo?: any; pembro?: any } = {};
 
@@ -564,7 +570,11 @@ async function fitPiecewiseModels(state: SurvivalAnalysisState): Promise<Partial
           })
           .where(eq(analyses.id, state.analysis_id));
       } catch (error) {
-        console.error(`Error fitting piecewise model ${distribution} for ${arm}:`, error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`[Piecewise Fit Error] Model: ${distribution}, Arm: ${arm}, Cutpoint: ${cutpoint.toFixed(1)}m. Error details:`, errorMessage);
+        if (distribution === 'generalized-gamma' && arm === 'chemo') {
+          console.error(`[CRITICAL DEBUG] Failed to fit generalised-gamma for chemo. This distribution is known to be unstable with certain cutpoints.`);
+        }
         // Continue with next model
       }
     }
@@ -788,6 +798,42 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
       console.warn(`[Synthesis] Error generating IPD KM plot: ${error}`);
       // Don't fail synthesis if plot generation fails
     }
+
+    // Check for R-generated IPD plot (reconstructed_km_plot.png)
+    if (!ipdKmPlot) {
+      try {
+        const dataDir = getDataDirectory();
+        // Resolve absolute path (handle relative paths from cwd)
+        const absDataDir = dataDir.startsWith('/') ? dataDir : resolve(process.cwd(), dataDir);
+        const rPlotPath = join(absDataDir, 'reconstructed_km_plot.png');
+
+        // If plot doesn't exist, try to generate it using the R script
+        if (!existsSync(rPlotPath)) {
+          console.log('[Synthesis] R IPD plot not found, attempting to generate...');
+          try {
+            // Assume R script is in r-service sibling directory
+            // workspace/my-app/server -> workspace/my-app/r-service
+            const rScriptPath = resolve(process.cwd(), '../r-service/plot_reconstructed_km.R');
+
+            if (existsSync(rScriptPath)) {
+              await execAsync(`Rscript "${rScriptPath}"`);
+              console.log('[Synthesis] Executed R plot script');
+            } else {
+              console.warn(`[Synthesis] R plot script not found at ${rScriptPath}`);
+            }
+          } catch (execErr) {
+            console.warn('[Synthesis] Failed to run R plot script:', execErr);
+          }
+        }
+
+        if (existsSync(rPlotPath)) {
+          ipdKmPlot = readFileSync(rPlotPath, 'base64');
+          console.log('[Synthesis] Loaded R-generated IPD KM plot');
+        }
+      } catch (err) {
+        console.warn('[Synthesis] Error loading R-generated IPD plot:', err);
+      }
+    }
   }
 
   // Prepare assessment data for synthesis
@@ -795,7 +841,12 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
     model_id: model.model_id,
     arm: model.model_result.arm,
     approach: model.model_result.approach,
-    distribution: model.model_result.distribution,
+    // Fix for Spline models having undefined distribution
+    distribution: model.model_result.distribution || (
+      model.model_result.approach === 'Spline'
+        ? `${model.model_result.scale}-scale (${model.model_result.knots} knots)`
+        : model.model_result.distribution
+    ),
     aic: model.model_result.aic,
     bic: model.model_result.bic,
     vision_scores: {
@@ -818,16 +869,50 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
     } : undefined,
   }));
 
-  // Add IPD KM plot to diagnostic plots if available
-  const phTestsWithIpdPlot = state.ph_tests ? {
-    ...state.ph_tests,
-    diagnostic_plots: {
-      ...state.ph_tests.diagnostic_plots,
-      ipd_km_plot: ipdKmPlot
-    }
-  } : undefined;
+  // Process diagnostic plots - load from file if needed
+  let phTestsForSynthesis = state.ph_tests ? { ...state.ph_tests } : undefined;
 
-  const synthesis = await synthesizeCrossModel(assessmentData, phTestsWithIpdPlot, state.cutpoint_results);
+  if (phTestsForSynthesis) {
+    const processedPlots: Record<string, string> = {
+      ...(phTestsForSynthesis.diagnostic_plots || {})
+    };
+
+    // Add IPD KM plot if available
+    if (ipdKmPlot) {
+      processedPlots['ipd_km_plot'] = ipdKmPlot;
+    }
+
+    // Check for file paths and load them as base64
+    for (const [key, value] of Object.entries(processedPlots)) {
+      if (typeof value === 'string' && (value.startsWith('/') || value.startsWith('./') || value.startsWith('../'))) {
+        try {
+          if (existsSync(value)) {
+            const fileData = readFileSync(value, 'base64');
+            processedPlots[key] = fileData;
+            console.log(`[Synthesis] Loaded diagnostic plot ${key} from file`);
+          } else {
+            console.warn(`[Synthesis] Diagnostic plot file not found: ${value}`);
+          }
+        } catch (err) {
+          console.warn(`[Synthesis] Error reading diagnostic plot ${key}: ${err}`);
+        }
+      }
+    }
+
+    phTestsForSynthesis.diagnostic_plots = processedPlots;
+  } else if (ipdKmPlot) {
+    // Create new PH tests object just for the plot if missing
+    phTestsForSynthesis = {
+      chow_test_pvalue: 0,
+      schoenfeld_pvalue: 0,
+      logrank_pvalue: 0,
+      decision: 'pooled',
+      rationale: 'Generated for IPD plot',
+      diagnostic_plots: { ipd_km_plot: ipdKmPlot }
+    };
+  }
+
+  const synthesis = await synthesizeCrossModel(assessmentData, phTestsForSynthesis, state.cutpoint_results);
 
   // Save synthesis report to database
   const db = await getDatabase(getDatabaseUrl()!);
@@ -880,8 +965,8 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
  * @param projectId - Optional Supabase project ID for persistent storage
  */
 export async function runSurvivalAnalysisWorkflow(
-  analysisId: string, 
-  userId: string, 
+  analysisId: string,
+  userId: string,
   endpointType: 'OS' | 'PFS' = 'OS',
   projectId?: string
 ): Promise<void> {
@@ -908,7 +993,7 @@ export async function runSurvivalAnalysisWorkflow(
         total_steps: 42,
         parameters: { localAnalysisId: analysisId },
       });
-      
+
       if (supabaseResult.data && supabaseResult.data.length > 0) {
         state.supabase_analysis_id = supabaseResult.data[0].id;
         console.log(`[Supabase] Created analysis record: ${state.supabase_analysis_id}`);
@@ -932,7 +1017,7 @@ export async function runSurvivalAnalysisWorkflow(
     // Step 3: Test PH
     const phUpdate = await testPH(state);
     state = { ...state, ...phUpdate };
-    
+
     // Save PH test to Supabase
     if (state.supabase_analysis_id && state.ph_tests) {
       await saveSupabasePHTest({
@@ -957,7 +1042,7 @@ export async function runSurvivalAnalysisWorkflow(
     // Step 6: Fit spline models
     const splineUpdate = await fitSplineModels(state);
     state = { ...state, ...splineUpdate };
-    
+
     // Save all models to Supabase
     if (state.supabase_analysis_id) {
       for (const model of state.fitted_models) {
@@ -981,7 +1066,7 @@ export async function runSurvivalAnalysisWorkflow(
 
     // Step 7: Generate synthesis
     await generateSynthesis(state);
-    
+
     // Save synthesis to Supabase
     if (state.supabase_analysis_id && state.synthesis_report) {
       await saveSupabaseSynthesis({
@@ -991,14 +1076,14 @@ export async function runSurvivalAnalysisWorkflow(
         hta_strategy: state.synthesis_report.hta_strategy,
         full_text: state.synthesis_report.full_text || JSON.stringify(state.synthesis_report),
       }).catch(err => console.warn('[Supabase] Synthesis save error:', err));
-      
+
       // Update analysis as completed
       await updateSupabaseAnalysis(state.supabase_analysis_id, {
         status: 'completed',
         workflow_state: 'SYNTHESIS_COMPLETE',
         progress: state.total_models,
       }).catch(err => console.warn('[Supabase] Analysis update error:', err));
-      
+
       console.log(`[Supabase] Analysis complete and saved`);
     }
   } catch (error) {
