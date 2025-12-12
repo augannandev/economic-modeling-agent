@@ -76,9 +76,10 @@ def _generate_actual_model_predictions(
     import pandas as pd
     from lifelines import (
         ExponentialFitter, WeibullFitter, LogNormalFitter, 
-        LogLogisticFitter, GeneralizedGammaFitter, SplineFitter,
+        LogLogisticFitter, GeneralizedGammaFitter,
         KaplanMeierFitter
     )
+    from custom_spline_models import RoystonParmarFitter
     # Try to import GompertzFitter if available
     try:
         from lifelines import GompertzFitter
@@ -412,73 +413,55 @@ def _generate_actual_model_predictions(
                     raise ValueError(f"Unknown distribution: {distribution}")
                     
             elif approach == 'spline':
-                # Refit spline model
+                # Refit spline model using RoystonParmarFitter
                 if knots is None:
                     knots = 2  # Default
                 
                 try:
-                    fitter = SplineFitter(knots=knots)
+                    fitter = RoystonParmarFitter(scale=scale or 'hazard', knots=knots)
                     fitter.fit(df['time'], df['event'])
                     
-                    # Use survival_function_at_times for proper parametric extrapolation
-                    try:
-                        model_survival = fitter.survival_function_at_times(prediction_times, label='prediction').values
-                    except (AttributeError, TypeError, ValueError):
-                        # Fallback: use interpolation for observed range, parametric for extrapolation
-                        survival_function = fitter.survival_function_
-                        timeline = survival_function.index.values
-                        
-                        # Split into observed and extrapolation regions
-                        observed_mask = prediction_times <= timeline[-1]
-                        extrap_mask = prediction_times > timeline[-1]
-                        
-                        model_survival = np.ones_like(prediction_times)
-                        
-                        # Interpolate within observed range
-                        if np.any(observed_mask):
-                            model_survival[observed_mask] = np.interp(
-                                prediction_times[observed_mask],
-                                timeline,
-                                survival_function.iloc[:, 0].values,
-                                left=1.0
-                            )
-                        
-                        # Parametric extrapolation beyond observed range
-                        if np.any(extrap_mask):
-                            extrap_times = prediction_times[extrap_mask]
-                            # Use the fitted model's parametric form
-                            if hasattr(fitter, 'lambda_') and hasattr(fitter, 'rho_'):
-                                # Weibull
-                                model_survival[extrap_mask] = np.exp(-(fitter.lambda_ * extrap_times) ** fitter.rho_)
-                            elif hasattr(fitter, 'lambda_'):
-                                # Exponential
-                                model_survival[extrap_mask] = np.exp(-fitter.lambda_ * extrap_times)
-                            elif hasattr(fitter, 'mu_') and hasattr(fitter, 'sigma_'):
-                                # Log-Normal
-                                from scipy.stats import lognorm
-                                model_survival[extrap_mask] = 1 - lognorm.cdf(extrap_times, s=fitter.sigma_, scale=np.exp(fitter.mu_))
-                            elif hasattr(fitter, 'alpha_') and hasattr(fitter, 'beta_'):
-                                # Log-Logistic
-                                model_survival[extrap_mask] = 1 / (1 + (extrap_times / fitter.alpha_) ** fitter.beta_)
-                            else:
-                                # Generic exponential decay from last point
-                                last_surv = survival_function.iloc[-1, 0]
-                                last_time = timeline[-1]
-                                if len(timeline) > 1 and last_surv > 0:
-                                    dt = timeline[-1] - timeline[-2]
-                                    ds = survival_function.iloc[-2, 0] - last_surv
-                                    hazard_est = ds / (dt * survival_function.iloc[-2, 0]) if dt > 0 else 0.01
-                                else:
-                                    hazard_est = 0.01
-                                model_survival[extrap_mask] = last_surv * np.exp(-hazard_est * (extrap_times - last_time))
-                except Exception as e:
-                    # If Python spline fitting fails, try R service (better RP implementation)
-                    print(f"Python spline fitting failed: {e}, trying R service...")
-                    model_survival = _try_r_service_for_predictions(
-                        'rp-spline', original_data, model_result, prediction_times
-                    )
-                    if model_survival is None:
-                        raise ValueError(f"Spline model failed in both Python and R: {e}")
+                    # Use predict_survival for RoystonParmarFitter
+                    model_survival = fitter.predict_survival(prediction_times)
+                    # Ensure it's a numpy array
+                    if hasattr(model_survival, 'values'):
+                        model_survival = model_survival.values
+                    model_survival = np.array(model_survival).flatten()
+                except Exception as spline_error:
+                    # Fallback: use KM interpolation with exponential extrapolation
+                    print(f"Spline fitting failed: {spline_error}, using KM fallback")
+                    kmf = KaplanMeierFitter()
+                    kmf.fit(df['time'], df['event'])
+                    survival_function = kmf.survival_function_
+                    timeline = survival_function.index.values
+                    
+                    # Split into observed and extrapolation regions
+                    observed_mask = prediction_times <= timeline[-1]
+                    extrap_mask = prediction_times > timeline[-1]
+                    
+                    model_survival = np.ones_like(prediction_times)
+                    
+                    # Interpolate within observed range
+                    if np.any(observed_mask):
+                        model_survival[observed_mask] = np.interp(
+                            prediction_times[observed_mask],
+                            timeline,
+                            survival_function.iloc[:, 0].values,
+                            left=1.0
+                        )
+                    
+                    # Exponential extrapolation beyond observed range
+                    if np.any(extrap_mask):
+                        last_surv = survival_function.iloc[-1, 0]
+                        last_time = timeline[-1]
+                        extrap_times = prediction_times[extrap_mask]
+                        if len(timeline) > 1 and last_surv > 0:
+                            dt = timeline[-1] - timeline[-2]
+                            ds = survival_function.iloc[-2, 0] - last_surv
+                            hazard_est = ds / (dt * survival_function.iloc[-2, 0]) if dt > 0 else 0.01
+                        else:
+                            hazard_est = 0.01
+                        model_survival[extrap_mask] = last_surv * np.exp(-hazard_est * (extrap_times - last_time))
             else:
                 raise ValueError(f"Unknown approach: {approach}")
                 

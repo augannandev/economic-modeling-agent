@@ -151,8 +151,7 @@ def fit_piecewise_model(data: Dict, arm: str, distribution: str, cutpoint: float
     model_result = fit_one_piece_model(
         {
             "time": post_data_adjusted['time'].tolist(),
-            "event": post_data_adjusted['event'].tolist(),
-            "arm": post_data_adjusted['arm'].tolist()
+            "event": post_data_adjusted['event'].tolist()
         },
         arm,
         distribution
