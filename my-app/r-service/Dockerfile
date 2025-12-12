@@ -1,4 +1,4 @@
-FROM r-base:4.3.0
+FROM rocker/r-ver:4.3.0
 
 WORKDIR /app
 

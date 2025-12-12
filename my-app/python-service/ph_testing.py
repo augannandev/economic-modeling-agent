@@ -292,7 +292,10 @@ def generate_ph_diagnostic_plots(chemo_df: pd.DataFrame, pembro_df: pd.DataFrame
                     smooth_values = np.array(r_result.get('smooth_values', []))
                     ci_lower = np.array(r_result.get('ci_lower', []))
                     ci_upper = np.array(r_result.get('ci_upper', []))
-                    p_value = float(r_result.get('p_value', 0.05))
+                    param_p = r_result.get('p_value', 0.05)
+                    if isinstance(param_p, list):
+                        param_p = param_p[0]
+                    p_value = float(param_p)
                     
                     # Store R service data for plotting
                     r_plot_data = {
