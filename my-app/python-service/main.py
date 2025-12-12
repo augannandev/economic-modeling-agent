@@ -902,11 +902,38 @@ async def ipd_data(endpoint: str = "OS", projectId: str = None):
             kmf.fit(df['time'], df['event'])
             
             median_survival = kmf.median_survival_time_
-            ci = kmf.confidence_interval_median_survival_time_
-            
             median_val = float(median_survival) if not np.isinf(median_survival) else None
-            ci_lower = float(ci.iloc[0, 0]) if not np.isnan(ci.iloc[0, 0]) else None
-            ci_upper = float(ci.iloc[0, 1]) if not np.isnan(ci.iloc[0, 1]) else None
+            
+            # Get CI for median - handle different lifelines versions
+            ci_lower = None
+            ci_upper = None
+            try:
+                # Newer lifelines versions
+                if hasattr(kmf, 'confidence_interval_median_survival_time_'):
+                    ci = kmf.confidence_interval_median_survival_time_
+                    ci_lower = float(ci.iloc[0, 0]) if not np.isnan(ci.iloc[0, 0]) else None
+                    ci_upper = float(ci.iloc[0, 1]) if not np.isnan(ci.iloc[0, 1]) else None
+                else:
+                    # Fallback: use percentile method for approximate CI
+                    # Get times where survival crosses 0.5 threshold
+                    surv_func = kmf.survival_function_
+                    ci_df = kmf.confidence_interval_survival_function_
+                    
+                    # Find where lower CI crosses 0.5 (upper bound of median CI)
+                    lower_ci_col = ci_df.columns[0]
+                    upper_ci_col = ci_df.columns[1]
+                    
+                    # Lower bound: where upper CI curve crosses 0.5
+                    mask_lower = ci_df[upper_ci_col] <= 0.5
+                    if mask_lower.any():
+                        ci_lower = float(ci_df[mask_lower].index[0])
+                    
+                    # Upper bound: where lower CI curve crosses 0.5
+                    mask_upper = ci_df[lower_ci_col] <= 0.5
+                    if mask_upper.any():
+                        ci_upper = float(ci_df[mask_upper].index[0])
+            except Exception as ci_err:
+                print(f"[calc_stats] Could not compute median CI: {ci_err}")
             
             follow_up = f"{df['time'].min():.1f} - {df['time'].max():.1f} mo"
             
