@@ -729,12 +729,29 @@ async def ipd_preview(endpoint: str = "OS"):
             kmf.fit(df['time'], df['event'])
             
             median_survival = kmf.median_survival_time_
-            ci = kmf.confidence_interval_median_survival_time_
-            
-            # Handle edge cases where median may not be reached
             median_val = float(median_survival) if not np.isinf(median_survival) else None
-            ci_lower = float(ci.iloc[0, 0]) if not np.isnan(ci.iloc[0, 0]) else None
-            ci_upper = float(ci.iloc[0, 1]) if not np.isnan(ci.iloc[0, 1]) else None
+            
+            # Get CI for median - handle different lifelines versions
+            ci_lower = None
+            ci_upper = None
+            try:
+                if hasattr(kmf, 'confidence_interval_median_survival_time_'):
+                    ci = kmf.confidence_interval_median_survival_time_
+                    ci_lower = float(ci.iloc[0, 0]) if not np.isnan(ci.iloc[0, 0]) else None
+                    ci_upper = float(ci.iloc[0, 1]) if not np.isnan(ci.iloc[0, 1]) else None
+                else:
+                    # Fallback for older lifelines versions
+                    ci_df = kmf.confidence_interval_survival_function_
+                    lower_ci_col = ci_df.columns[0]
+                    upper_ci_col = ci_df.columns[1]
+                    mask_lower = ci_df[upper_ci_col] <= 0.5
+                    if mask_lower.any():
+                        ci_lower = float(ci_df[mask_lower].index[0])
+                    mask_upper = ci_df[lower_ci_col] <= 0.5
+                    if mask_upper.any():
+                        ci_upper = float(ci_df[mask_upper].index[0])
+            except Exception:
+                pass
             
             follow_up = f"{df['time'].min():.1f} - {df['time'].max():.1f} mo"
             

@@ -684,11 +684,11 @@ plot_km_from_ipd <- function(req) {
 plot_km_dynamic <- function(req) {
   tryCatch(
     {
-      # Parse JSON body
+      # Parse JSON body - use simplifyVector=FALSE to preserve list structure
       if (is.raw(req$body)) {
-        body <- jsonlite::fromJSON(rawToChar(req$body))
+        body <- jsonlite::fromJSON(rawToChar(req$body), simplifyVector = FALSE)
       } else if (is.character(req$body)) {
-        body <- jsonlite::fromJSON(req$body)
+        body <- jsonlite::fromJSON(req$body, simplifyVector = FALSE)
       } else {
         body <- req$body
       }
@@ -713,12 +713,31 @@ plot_km_dynamic <- function(req) {
       arm_names <- c()
       arm_colors <- c()
 
-      for (i in seq_along(arms_data)) {
-        arm <- arms_data[[i]]
-        arm_name <- arm$name
-        arm_time <- arm$time
-        arm_event <- arm$event
-        arm_color <- if (is.null(arm$color)) default_colors[((i - 1) %% length(default_colors)) + 1] else arm$color
+      # Handle both list and data.frame structures from jsonlite
+      n_arms <- if (is.data.frame(arms_data)) nrow(arms_data) else length(arms_data)
+
+      for (i in seq_len(n_arms)) {
+        # Extract arm data - handle both data.frame and list formats
+        if (is.data.frame(arms_data)) {
+          arm_name <- arms_data$name[i]
+          arm_time <- unlist(arms_data$time[i])
+          arm_event <- unlist(arms_data$event[i])
+          arm_color <- if (is.null(arms_data$color) || is.na(arms_data$color[i])) {
+            default_colors[((i - 1) %% length(default_colors)) + 1]
+          } else {
+            arms_data$color[i]
+          }
+        } else {
+          arm <- arms_data[[i]]
+          arm_name <- arm$name
+          arm_time <- unlist(arm$time)
+          arm_event <- unlist(arm$event)
+          arm_color <- if (is.null(arm$color)) {
+            default_colors[((i - 1) %% length(default_colors)) + 1]
+          } else {
+            arm$color
+          }
+        }
 
         all_times <- c(all_times, arm_time)
         all_events <- c(all_events, arm_event)
