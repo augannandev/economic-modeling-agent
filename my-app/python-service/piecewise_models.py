@@ -245,7 +245,24 @@ def fit_piecewise_model(data: Dict, arm: str, distribution: str, cutpoint: float
              predictions[str(t)] = float(kmf.predict(t))
         else:
              t_adj = t - cutpoint
-             s_param = float(fitter.predict_survival_function(t_adj).item() if hasattr(fitter.predict_survival_function(t_adj), 'item') else fitter.predict_survival_function(t_adj))
+             # Get survival probability using the appropriate method
+             if hasattr(fitter, 'predict_survival'):
+                 # Custom GompertzFitter
+                 s_param = float(fitter.predict_survival([t_adj])[0])
+             elif hasattr(fitter, 'survival_function_at_times'):
+                 # Standard lifelines fitters
+                 result = fitter.survival_function_at_times([t_adj])
+                 if hasattr(result, 'values'):
+                     s_param = float(result.values.flatten()[0])
+                 else:
+                     s_param = float(result.flatten()[0] if hasattr(result, 'flatten') else result[0])
+             else:
+                 # Fallback: interpolate from survival_function_
+                 sf = fitter.survival_function_
+                 if t_adj <= sf.index.max():
+                     s_param = float(np.interp(t_adj, sf.index, sf.iloc[:, 0]))
+                 else:
+                     s_param = float(sf.iloc[-1, 0])
              predictions[str(t)] = prob_at_cutpoint * s_param
 
     model_result["cutpoint"] = cutpoint
