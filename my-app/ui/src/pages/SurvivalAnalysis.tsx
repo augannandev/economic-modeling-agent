@@ -12,6 +12,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { ChatSidebar } from '@/components/chat';
 import { FinalDecisionPanel, ReproducibilityTab, IPDPreview } from '@/components/survival';
@@ -26,7 +27,11 @@ import {
   ChevronRight,
   Download,
   FileText,
-  FileType
+  FileType,
+  Database,
+  FolderPlus,
+  ChevronDown,
+  Info
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -66,6 +71,12 @@ export function SurvivalAnalysis() {
     loadAnalyses();
     loadSupabaseProjects();
   }, []);
+
+  // Reload IPD preview when project changes
+  useEffect(() => {
+    // This will trigger IPDPreview to reload when projectId changes
+    // The IPDPreview component will handle the reload via its own useEffect
+  }, [selectedProjectId]);
   
   const loadSupabaseProjects = async () => {
     try {
@@ -256,25 +267,6 @@ export function SurvivalAnalysis() {
                 )}
               </Button>
 
-              {/* Project Selector */}
-              {supabaseConfigured && supabaseProjects.length > 0 && (
-                <select
-                  value={selectedProjectId || ''}
-                  onChange={(e) => setSelectedProjectId(e.target.value || null)}
-                  className="h-9 px-3 py-1 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">Demo Data</option>
-                  {supabaseProjects.map((project) => (
-                    <option 
-                      key={project.id} 
-                      value={project.id}
-                      disabled={!project.hasIPD}
-                    >
-                      {project.name} {project.hasIPD ? `(${project.ipdCount} records)` : '(no IPD)'}
-                    </option>
-                  ))}
-                </select>
-              )}
 
               <Button onClick={handleStartAnalysis} disabled={loading}>
                 {loading ? (
@@ -288,6 +280,143 @@ export function SurvivalAnalysis() {
               </Button>
             </div>
           </div>
+
+          {/* Project Selection Card - Prominent */}
+          <Card className="border-primary/20 bg-primary/5">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Select Project Data</CardTitle>
+              </div>
+              <CardDescription>
+                Choose which project's IPD data to use for analysis, or use demo data
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                {supabaseConfigured ? (
+                  <>
+                    {supabaseProjects.length > 0 ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button 
+                            variant="outline" 
+                            className="w-full sm:w-auto justify-between gap-2 min-w-[250px]"
+                          >
+                            <div className="flex items-center gap-2 flex-1">
+                              {selectedProjectId ? (
+                                <>
+                                  <Database className="h-4 w-4" />
+                                  <span className="truncate">
+                                    {supabaseProjects.find(p => p.id === selectedProjectId)?.name || 'Select Project'}
+                                  </span>
+                                  {supabaseProjects.find(p => p.id === selectedProjectId)?.hasIPD && (
+                                    <span className="text-xs text-muted-foreground">
+                                      ({supabaseProjects.find(p => p.id === selectedProjectId)?.ipdCount} records)
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <FileText className="h-4 w-4" />
+                                  <span>Demo Data</span>
+                                </>
+                              )}
+                            </div>
+                            <ChevronDown className="h-4 w-4 opacity-50" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-[300px]">
+                          <DropdownMenuItem
+                            onClick={() => setSelectedProjectId(null)}
+                            className={cn(
+                              "flex items-center gap-2",
+                              !selectedProjectId && "bg-primary/10"
+                            )}
+                          >
+                            <FileText className="h-4 w-4" />
+                            <div className="flex flex-col">
+                              <span className="font-medium">Demo Data</span>
+                              <span className="text-xs text-muted-foreground">Use pre-loaded demo IPD</span>
+                            </div>
+                            {!selectedProjectId && <CheckCircle2 className="h-4 w-4 ml-auto" />}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          {supabaseProjects.map((project) => (
+                            <DropdownMenuItem
+                              key={project.id}
+                              onClick={() => project.hasIPD && setSelectedProjectId(project.id)}
+                              disabled={!project.hasIPD}
+                              className={cn(
+                                "flex items-center gap-2",
+                                selectedProjectId === project.id && "bg-primary/10"
+                              )}
+                            >
+                              <Database className={cn(
+                                "h-4 w-4",
+                                project.hasIPD ? "text-primary" : "text-muted-foreground opacity-50"
+                              )} />
+                              <div className="flex flex-col flex-1 min-w-0">
+                                <span className={cn(
+                                  "font-medium truncate",
+                                  !project.hasIPD && "text-muted-foreground"
+                                )}>
+                                  {project.name}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {project.hasIPD 
+                                    ? `${project.ipdCount} IPD record${project.ipdCount !== 1 ? 's' : ''}`
+                                    : 'No IPD data'
+                                  }
+                                </span>
+                              </div>
+                              {selectedProjectId === project.id && (
+                                <CheckCircle2 className="h-4 w-4 ml-auto text-primary" />
+                              )}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : (
+                      <div className="flex flex-col gap-2 w-full">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Info className="h-4 w-4" />
+                          <span>No projects found. Using demo data.</span>
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => window.location.href = '/km-digitizer'}
+                          className="w-full sm:w-auto gap-2"
+                        >
+                          <FolderPlus className="h-4 w-4" />
+                          Create Project with KM Digitizer
+                        </Button>
+                      </div>
+                    )}
+                    {selectedProjectId && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-md text-sm">
+                        <Database className="h-4 w-4 text-primary" />
+                        <span className="font-medium">
+                          {supabaseProjects.find(p => p.id === selectedProjectId)?.name}
+                        </span>
+                        {supabaseProjects.find(p => p.id === selectedProjectId)?.ipdCount !== undefined && (
+                          <span className="text-xs text-muted-foreground">
+                            • {supabaseProjects.find(p => p.id === selectedProjectId)?.ipdCount} IPD record{supabaseProjects.find(p => p.id === selectedProjectId)?.ipdCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Info className="h-4 w-4" />
+                    <span>Supabase not configured. Using demo data.</span>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Error Display */}
           {error && (
@@ -307,6 +436,7 @@ export function SurvivalAnalysis() {
                 handleStartAnalysis();
               }}
               isStarting={loading}
+              projectId={selectedProjectId}
             />
           )}
 

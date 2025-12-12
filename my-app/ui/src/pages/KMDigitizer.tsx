@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { PDFViewer } from '@/components/digitizer/PDFViewer';
 import { ExtractionProgress } from '@/components/digitizer/ExtractionProgress';
 import { DataEditor } from '@/components/digitizer/DataEditor';
@@ -25,7 +26,6 @@ import {
   ArrowUpDown,
   Info,
   Download,
-  AlertCircle,
   X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -162,7 +162,7 @@ function sortPointsByTime(points: DataPoint[]): DataPoint[] {
 }
 
 export function KMDigitizer() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const projectId = searchParams.get('project');
   
@@ -184,29 +184,29 @@ export function KMDigitizer() {
   const [granularity, setGranularity] = useState(0.25);
   const [autoSort, setAutoSort] = useState(true);
   
-  // Project from URL
+  // Project from URL (optional)
   const [project, setProject] = useState<Project | null>(null);
-  const [projectLoading, setProjectLoading] = useState(true);
-  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [showProjectDialog, setShowProjectDialog] = useState(false);
+  const [availableProjects, setAvailableProjects] = useState<Project[]>([]);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
   
-  // Load project from URL on mount
+  // Load project from URL on mount (if provided)
   useEffect(() => {
     const loadProject = async () => {
       if (!projectId) {
         setProjectLoading(false);
-        setProjectError('No project selected. Please access this page from a project.');
-        return;
+        return; // No project required - allow standalone use
       }
       
       try {
         setProjectLoading(true);
         const result = await projectsApi.getProject(projectId);
         setProject(result.project);
-        setProjectError(null);
       } catch (err) {
         console.error('Failed to load project:', err);
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load project';
-        setProjectError(errorMessage);
+        // Don't block the page - allow standalone use
       } finally {
         setProjectLoading(false);
       }
@@ -214,6 +214,21 @@ export function KMDigitizer() {
     
     loadProject();
   }, [projectId]);
+
+  // Load available projects for save dialog
+  useEffect(() => {
+    if (showProjectDialog) {
+      const loadProjects = async () => {
+        try {
+          const result = await projectsApi.listProjects();
+          setAvailableProjects(result.projects);
+        } catch (err) {
+          console.error('Failed to load projects:', err);
+        }
+      };
+      loadProjects();
+    }
+  }, [showProjectDialog]);
 
   // Image handling
   const handleImageUpload = useCallback((endpointIndex: number, type: 'km_plot' | 'risk_table', file: File) => {
@@ -740,8 +755,8 @@ export function KMDigitizer() {
     }
   };
 
-  // Show loading state
-  if (projectLoading) {
+  // Show loading state only if project ID was provided
+  if (projectLoading && projectId) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center h-64">
@@ -754,41 +769,174 @@ export function KMDigitizer() {
     );
   }
 
-  // Show error state if no project
-  if (projectError || !project) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card className="p-8 text-center max-w-md mx-auto">
-          <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
-          <h2 className="text-xl font-semibold mb-2">Project Required</h2>
-          <p className="text-muted-foreground mb-4">
-            {projectError || 'Please access the KM Digitizer from a project to digitize curves.'}
-          </p>
-          <Button onClick={() => navigate('/projects')}>
-            <ChevronLeft className="h-4 w-4 mr-2" />
-            Go to Projects
-          </Button>
-        </Card>
-      </div>
-    );
-  }
+  // Handle project creation
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) {
+      alert('Please enter a project name');
+      return;
+    }
+
+    try {
+      setIsCreatingProject(true);
+      const result = await projectsApi.createProject({
+        name: newProjectName.trim(),
+        description: 'Created from KM Digitizer',
+      });
+      setProject(result.project);
+      setShowProjectDialog(false);
+      setIsCreatingProject(false);
+      setNewProjectName('');
+      // Update URL to include project ID
+      setSearchParams({ project: result.project.id });
+      
+      // If IPD has been generated, save it to the new project
+      if (generatedIPD && generatedIPD.length > 0) {
+        const ipdRequests: { endpointType: string; arm: string; points: DataPoint[]; riskTable: RiskTableRow[] }[] = [];
+        
+        endpoints.forEach(endpoint => {
+          endpoint.extractedArms.forEach(arm => {
+            const pointsForIPD = arm.editedPoints || arm.fullResolutionPoints || arm.points;
+            const armNameForFile = arm.detectedName || arm.mappedArmType;
+            
+            ipdRequests.push({
+              endpointType: endpoint.endpointType,
+              arm: armNameForFile,
+              points: pointsForIPD,
+              riskTable: arm.editedRiskTable || arm.riskTable,
+            });
+          });
+        });
+
+        try {
+          const saveResult = await generatePseudoIPD(ipdRequests, result.project.id);
+          if (saveResult.success && saveResult.savedToDatabase) {
+            alert('IPD data has been saved to the new project!');
+          }
+        } catch (err) {
+          console.error('Failed to save IPD to new project:', err);
+          // Don't show error - user can regenerate manually
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create project:', err);
+      alert(`Failed to create project: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setIsCreatingProject(false);
+    }
+  };
+
+  // Handle saving to existing project
+  const handleSaveToProject = async (selectedProjectId: string) => {
+    setProjectLoading(true);
+    try {
+      const result = await projectsApi.getProject(selectedProjectId);
+      setProject(result.project);
+      setShowProjectDialog(false);
+      // Update URL to include project ID
+      setSearchParams({ project: selectedProjectId });
+      
+      // If IPD has been generated, save it to the project
+      if (generatedIPD && generatedIPD.length > 0) {
+        // Re-generate IPD with project ID to save to database
+        const currentProjectId = selectedProjectId;
+        const ipdRequests: { endpointType: string; arm: string; points: DataPoint[]; riskTable: RiskTableRow[] }[] = [];
+        
+        endpoints.forEach(endpoint => {
+          endpoint.extractedArms.forEach(arm => {
+            const pointsForIPD = arm.editedPoints || arm.fullResolutionPoints || arm.points;
+            const armNameForFile = arm.detectedName || arm.mappedArmType;
+            
+            ipdRequests.push({
+              endpointType: endpoint.endpointType,
+              arm: armNameForFile,
+              points: pointsForIPD,
+              riskTable: arm.editedRiskTable || arm.riskTable,
+            });
+          });
+        });
+
+        try {
+          const saveResult = await generatePseudoIPD(ipdRequests, currentProjectId);
+          if (saveResult.success && saveResult.savedToDatabase) {
+            alert('IPD data has been saved to the project!');
+          }
+        } catch (err) {
+          console.error('Failed to save IPD to project:', err);
+          // Don't show error - user can regenerate manually
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load project:', err);
+      alert(`Failed to load project: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setProjectLoading(false);
+    }
+  };
 
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <Button variant="ghost" onClick={() => navigate(`/projects/${projectId}`)} className="mb-2">
-            <ChevronLeft className="h-4 w-4 mr-2" />
-            Back to {project.name}
-          </Button>
-          <h1 className="text-3xl font-bold tracking-tight">KM Curve Digitizer</h1>
-          <p className="text-muted-foreground mt-1">
-            Digitizing curves for <span className="font-medium text-foreground">{project.name}</span>
-            {project.therapeutic_area && <span> • {project.therapeutic_area}</span>}
-          </p>
+          {project ? (
+            <>
+              <Button variant="ghost" onClick={() => navigate(`/projects/${project.id}`)} className="mb-2">
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                Back to {project.name}
+              </Button>
+              <h1 className="text-3xl font-bold tracking-tight">KM Curve Digitizer</h1>
+              <p className="text-muted-foreground mt-1">
+                Digitizing curves for <span className="font-medium text-foreground">{project.name}</span>
+                {project.therapeutic_area && <span> • {project.therapeutic_area}</span>}
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="text-3xl font-bold tracking-tight">KM Curve Digitizer</h1>
+              <p className="text-muted-foreground mt-1">
+                Extract survival curves from images and generate individual patient data
+              </p>
+            </>
+          )}
         </div>
+        {!project && (
+          <Button 
+            variant="outline" 
+            onClick={() => setShowProjectDialog(true)}
+            className="gap-2"
+          >
+            <Save className="h-4 w-4" />
+            Save to Project
+          </Button>
+        )}
       </div>
+
+      {/* Standalone Mode Banner */}
+      {!project && (
+        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              <Info className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-1">
+                  Working in Standalone Mode
+                </p>
+                <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+                  You can extract curves and generate IPD without a project. Save to a project anytime to store your data for survival analysis.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowProjectDialog(true)}
+                  className="gap-2 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900"
+                >
+                  <Save className="h-4 w-4" />
+                  Save to Project
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Global Settings Card */}
       <Card>
@@ -851,7 +999,7 @@ export function KMDigitizer() {
                 </div>
 
             {/* Project Info - shown when project is loaded */}
-            {project && (
+            {project ? (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-md text-sm">
                 <span className="text-muted-foreground">Project:</span>
                 <span className="font-medium">{project.name}</span>
@@ -859,6 +1007,16 @@ export function KMDigitizer() {
                   <span className="text-xs text-muted-foreground">({project.therapeutic_area})</span>
                 )}
               </div>
+            ) : (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setShowProjectDialog(true)}
+                className="gap-2"
+              >
+                <Save className="h-4 w-4" />
+                Save to Project
+              </Button>
             )}
 
             {/* Info */}
@@ -1640,13 +1798,23 @@ export function KMDigitizer() {
                     Back to Edit
                   </Button>
                   <div className="flex gap-2">
-                    {generatedIPD && generatedIPD.length > 0 && (
+                    {project && generatedIPD && generatedIPD.length > 0 && (
                       <Button 
                         variant="outline"
-                        onClick={() => projectId && navigate(`/projects/${projectId}`)}
+                        onClick={() => navigate(`/projects/${project.id}`)}
                         className="gap-2"
                       >
                         Go to Project
+                      </Button>
+                    )}
+                    {!project && (
+                      <Button 
+                        variant="outline"
+                        onClick={() => setShowProjectDialog(true)}
+                        className="gap-2"
+                      >
+                        <Save className="h-4 w-4" />
+                        Save to Project
                       </Button>
                     )}
                     <Button 
@@ -1776,6 +1944,122 @@ export function KMDigitizer() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Project Save/Create Dialog */}
+      {showProjectDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Save to Project</CardTitle>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setShowProjectDialog(false);
+                    setIsCreatingProject(false);
+                    setNewProjectName('');
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <CardDescription>
+                Save your extracted curves and IPD data to an existing project or create a new one.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Create New Project */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm">Create New Project</h3>
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    placeholder="Project name"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !isCreatingProject) {
+                        handleCreateProject();
+                      }
+                    }}
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={handleCreateProject}
+                    disabled={isCreatingProject || !newProjectName.trim()}
+                    className="gap-2"
+                  >
+                    {isCreatingProject ? (
+                      <>
+                        <span className="animate-spin">⏳</span>
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4" />
+                        Create
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+
+              {/* Select Existing Project */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm">Save to Existing Project</h3>
+                {availableProjects.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    No projects found. Create a new project above.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {availableProjects.map((proj) => (
+                      <Button
+                        key={proj.id}
+                        variant="outline"
+                        className="w-full justify-start h-auto py-3 px-4"
+                        onClick={() => handleSaveToProject(proj.id)}
+                      >
+                        <div className="flex flex-col items-start flex-1">
+                          <span className="font-medium">{proj.name}</span>
+                          {proj.therapeutic_area && (
+                            <span className="text-xs text-muted-foreground">
+                              {proj.therapeutic_area}
+                            </span>
+                          )}
+                        </div>
+                        <ChevronLeft className="h-4 w-4 rotate-180 ml-2" />
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Info */}
+              <div className="pt-2 border-t">
+                <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <p>
+                    Saving to a project will store your extracted curves and generated IPD data 
+                    in the database, making them available for survival analysis.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

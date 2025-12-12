@@ -36,17 +36,19 @@ interface IPDPreviewData {
 interface IPDPreviewProps {
   onStartAnalysis: (endpoint: 'OS' | 'PFS') => void;
   isStarting?: boolean;
+  projectId?: string | null;
 }
 
-export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewProps) {
+export function IPDPreview({ onStartAnalysis, isStarting = false, projectId }: IPDPreviewProps) {
   const [activeEndpoint, setActiveEndpoint] = useState<'OS' | 'PFS'>('OS');
   const [previewData, setPreviewData] = useState<Record<string, IPDPreviewData>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({ OS: true, PFS: true });
+  const [projectName, setProjectName] = useState<string | null>(null);
 
   useEffect(() => {
     loadPreview('OS');
     loadPreview('PFS');
-  }, []);
+  }, [projectId]);
 
   const loadPreview = async (endpoint: 'OS' | 'PFS') => {
     setLoading(prev => ({ ...prev, [endpoint]: true }));
@@ -54,7 +56,8 @@ export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewPr
       const apiUrl = import.meta.env.VITE_API_URL || 
         (window.location.hostname === 'localhost' ? 'http://localhost:3001' : '');
       
-      const response = await fetch(`${apiUrl}/api/v1/survival/ipd-preview?endpoint=${endpoint}`);
+      const url = `${apiUrl}/api/v1/survival/ipd-preview?endpoint=${endpoint}${projectId ? `&projectId=${projectId}` : ''}`;
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error('Failed to load preview');
@@ -62,13 +65,20 @@ export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewPr
       
       const data = await response.json();
       setPreviewData(prev => ({ ...prev, [endpoint]: data }));
+      
+      // Update project name if provided in response
+      if (data.projectName) {
+        setProjectName(data.projectName);
+      } else if (!projectId) {
+        setProjectName(null);
+      }
     } catch (err) {
       console.error(`Failed to load ${endpoint} preview:`, err);
       // Set empty/unavailable state
       setPreviewData(prev => ({
         ...prev,
         [endpoint]: {
-          source: 'demo',
+          source: projectId ? 'project' : 'demo',
           endpoint,
           plot_base64: '',
           statistics: {
@@ -78,6 +88,9 @@ export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewPr
           available: false
         }
       }));
+      if (!projectId) {
+        setProjectName(null);
+      }
     } finally {
       setLoading(prev => ({ ...prev, [endpoint]: false }));
     }
@@ -93,9 +106,15 @@ export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewPr
             <CardTitle className="flex items-center gap-2">
               <Database className="h-5 w-5" />
               IPD Data Preview
+              {projectName && (
+                <span className="text-sm font-normal text-muted-foreground">
+                  • {projectName}
+                </span>
+              )}
             </CardTitle>
             <CardDescription className="mt-1">
               Preview reconstructed Individual Patient Data before running analysis
+              {projectId && projectName && ` (from project: ${projectName})`}
             </CardDescription>
           </div>
           <Button 
@@ -246,13 +265,19 @@ export function IPDPreview({ onStartAnalysis, isStarting = false }: IPDPreviewPr
                     {/* Data Source */}
                     <div className={cn(
                       "p-3 rounded-lg text-sm",
-                      previewData[endpoint]?.source === 'digitizer' 
+                      projectId || previewData[endpoint]?.source === 'project'
                         ? "bg-green-500/10 text-green-700 dark:text-green-300" 
+                        : previewData[endpoint]?.source === 'digitizer'
+                        ? "bg-green-500/10 text-green-700 dark:text-green-300"
                         : "bg-blue-500/10 text-blue-700 dark:text-blue-300"
                     )}>
                       <span className="font-medium">Data source: </span>
-                      {previewData[endpoint]?.source === 'digitizer' 
-                        ? 'KM Digitizer (User-generated IPD)' 
+                      {projectId || previewData[endpoint]?.source === 'project'
+                        ? projectName 
+                          ? `Project: ${projectName} (User-generated IPD)`
+                          : 'Project Data (User-generated IPD)'
+                        : previewData[endpoint]?.source === 'digitizer'
+                        ? 'KM Digitizer (User-generated IPD)'
                         : 'Demo Data (Pre-loaded IPD)'
                       }
                     </div>

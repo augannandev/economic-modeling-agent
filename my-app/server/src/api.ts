@@ -1012,45 +1012,70 @@ survivalRoutes.get('/analyses/:id/chat/stream', async (c) => {
 survivalRoutes.get('/ipd-preview', async (c) => {
   try {
     const endpoint = c.req.query('endpoint') || 'OS';
+    const projectId = c.req.query('projectId') || undefined;
     
     // Get Python service URL
     const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
     
-    console.log(`[IPD Preview] Requesting ${endpoint} preview from Python service`);
+    console.log(`[IPD Preview] Requesting ${endpoint} preview${projectId ? ` for project ${projectId}` : ' (demo data)'} from Python service`);
+    
+    // Build URL with optional projectId
+    let previewUrl = `${pythonServiceUrl}/ipd-preview?endpoint=${endpoint}`;
+    if (projectId) {
+      previewUrl += `&projectId=${projectId}`;
+    }
     
     // Call Python service for IPD preview
-    const response = await fetch(`${pythonServiceUrl}/ipd-preview?endpoint=${endpoint}`);
+    const response = await fetch(previewUrl);
     
     if (!response.ok) {
       console.log(`[IPD Preview] Python service returned ${response.status}`);
       return c.json({
-        source: 'demo',
+        source: projectId ? 'project' : 'demo',
         endpoint,
         plot_base64: '',
         statistics: {
           pembro: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' },
           chemo: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' }
         },
-        available: false
+        available: false,
+        projectName: projectId ? undefined : undefined
       });
     }
     
     const data = await response.json() as Record<string, unknown>;
+    
+    // If projectId provided, try to get project name from Supabase
+    let projectName: string | undefined = undefined;
+    if (projectId && isSupabaseConfigured()) {
+      try {
+        const { getProject } = await import('./lib/supabase');
+        const projectResult = await getProject(projectId);
+        if (projectResult.data && projectResult.data.length > 0) {
+          projectName = projectResult.data[0].name;
+        }
+      } catch (err) {
+        console.warn('[IPD Preview] Failed to fetch project name:', err);
+      }
+    }
+    
     return c.json({
       ...data,
-      available: true
+      available: true,
+      projectName: projectName || (projectId ? undefined : undefined)
     });
   } catch (error) {
     console.error('[IPD Preview] Error:', error);
     return c.json({
-      source: 'demo',
+      source: c.req.query('projectId') ? 'project' : 'demo',
       endpoint: c.req.query('endpoint') || 'OS',
       plot_base64: '',
       statistics: {
         pembro: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' },
         chemo: { n: 0, events: 0, median: 0, ci_lower: 0, ci_upper: 0, follow_up_range: 'N/A' }
       },
-      available: false
+      available: false,
+      projectName: undefined
     });
   }
 });
