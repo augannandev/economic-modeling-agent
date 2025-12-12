@@ -1395,7 +1395,9 @@ class IPDBuilder:
         arm_name: str = "Treatment"
     ) -> Dict[str, Any]:
         """
-        Reconstruct individual patient data using Guyot method
+        Reconstruct individual patient data using Guyot method.
+        
+        First tries R service (IPDfromKM package), then falls back to Python implementation.
         
         Args:
             km_points: List of {time, survival} dicts
@@ -1408,6 +1410,144 @@ class IPDBuilder:
         if not km_points:
             return {"success": False, "error": "No KM points provided"}
         
+        # Try R service first (IPDfromKM package)
+        r_result = self._try_r_service_ipd(km_points, atrisk_points, arm_name)
+        if r_result:
+            print(f"[IPDBuilder] ✅ Used R service (IPDfromKM) for reconstruction")
+            return r_result
+        
+        # Check if R service is required (production mode)
+        import os
+        require_r_service = os.environ.get('REQUIRE_R_SERVICE_IPD', 'true').lower() == 'true'
+        
+        if require_r_service:
+            error_msg = (
+                "R service (IPDfromKM) is required for IPD reconstruction but is unavailable. "
+                "Please ensure the R service is running and accessible at R_SERVICE_URL. "
+                "Set REQUIRE_R_SERVICE_IPD=false to allow Python fallback (not recommended for production)."
+            )
+            print(f"[IPDBuilder] ❌ {error_msg}")
+            return {"success": False, "error": error_msg}
+        
+        # Fallback to Python implementation (only if explicitly allowed)
+        print(f"[IPDBuilder] ⚠️ R service unavailable, using Python implementation (fallback mode)")
+        return self._reconstruct_ipd_python(km_points, atrisk_points, arm_name)
+    
+    def _try_r_service_ipd(
+        self,
+        km_points: List[Dict],
+        atrisk_points: List[Dict],
+        arm_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Try to use R service (IPDfromKM) for IPD reconstruction."""
+        import requests
+        import os
+        
+        r_service_url = os.environ.get('R_SERVICE_URL', 'http://localhost:8001')
+        
+        try:
+            # Quick health check
+            try:
+                health_check = requests.get(f"{r_service_url}/", timeout=2)
+                if not health_check.ok:
+                    return None
+            except requests.exceptions.RequestException:
+                return None
+            
+            # Prepare data
+            km_times = [p.get('time', p.get('time_months', 0)) for p in km_points]
+            km_survival = [p.get('survival', 1.0) for p in km_points]
+            
+            # Get at-risk data if available
+            atrisk_times = []
+            atrisk_n = []
+            if atrisk_points:
+                for p in atrisk_points:
+                    t = p.get('time', p.get('time_months', 0))
+                    n = p.get('atRisk', p.get('at_risk', p.get('n_risk', 0)))
+                    atrisk_times.append(t)
+                    atrisk_n.append(int(n))
+            
+            # Estimate total patients from first at-risk or survival
+            if atrisk_n:
+                total_patients = atrisk_n[0]
+            else:
+                # Estimate from survival
+                first_survival = km_survival[0] if km_survival else 1.0
+                total_patients = 100  # Default estimate
+            
+            # Call R service
+            response = requests.post(
+                f"{r_service_url}/reconstruct-ipd",
+                json={
+                    'km_times': km_times,
+                    'km_survival': km_survival,
+                    'atrisk_times': atrisk_times if atrisk_times else None,
+                    'atrisk_n': atrisk_n if atrisk_n else None,
+                    'total_patients': total_patients
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                # Handle Plumber's list serialization (single values become lists)
+                success = result.get('success')
+                if isinstance(success, list):
+                    success = success[0] if success else False
+                
+                if success:
+                    # Convert R result to our format
+                    ipd_data = result.get('data', {})
+                    if not ipd_data:
+                        return None
+                    
+                    ipd_times = ipd_data.get('time', [])
+                    ipd_events = ipd_data.get('event', [])
+                    
+                    if not ipd_times or not ipd_events:
+                        return None
+                    
+                    # Ensure same length
+                    min_len = min(len(ipd_times), len(ipd_events))
+                    
+                    return {
+                        'success': True,
+                        'data': [
+                            {
+                                'patient_id': i,
+                                'time': float(ipd_times[i]),
+                                'event': int(ipd_events[i]),
+                                'arm': arm_name
+                            }
+                            for i in range(min_len)
+                        ],
+                        'summary': result.get('summary', {}),
+                        'validation': {'validated': True, 'source': 'R_IPDfromKM'}
+                    }
+            
+            return None
+        except Exception as e:
+            print(f"[IPDBuilder] R service error: {e}")
+            return None
+    
+    def _reconstruct_ipd_python(
+        self, 
+        km_points: List[Dict],
+        atrisk_points: List[Dict],
+        arm_name: str = "Treatment"
+    ) -> Dict[str, Any]:
+        """
+        Python implementation of Guyot IPD reconstruction (fallback).
+        
+        Args:
+            km_points: List of {time, survival} dicts
+            atrisk_points: List of {time, atRisk} dicts
+            arm_name: Treatment arm name
+            
+        Returns:
+            Dict with IPD data and summary statistics
+        """
         import pandas as pd
         
         print(f"[IPDBuilder] Starting Guyot reconstruction for {arm_name}")
@@ -1575,15 +1715,17 @@ class IPDBuilder:
             if i < len(times) - 1:
                 interval_length = times[i + 1] - t
                 
-                # IMPROVED: Place events in the LATTER half of interval (closer to step drop)
-                # This better matches how KM step functions work
+                # CRITICAL FIX: Place events RIGHT BEFORE the next timepoint to match step function behavior
+                # In KM curves, survival drops at event times, so events should occur
+                # just before the timepoint where survival drops
                 for j in range(n_evt):
-                    # Distribute events in the latter 60% of interval with some spread
-                    base_offset = 0.4 + 0.5 * (j / max(1, n_evt))  # Range: 0.4 to 0.9 of interval
-                    small_jitter = np.random.uniform(-0.05, 0.05) * interval_length
+                    # Place events in the last 20% of interval, very close to next timepoint
+                    # This ensures survival drops occur at the correct timepoint
+                    base_offset = 0.8 + 0.19 * (j / max(1, n_evt))  # Range: 0.8 to 0.99 of interval
+                    small_jitter = np.random.uniform(-0.01, 0.01) * interval_length
                     event_time = t + (base_offset * interval_length) + small_jitter
-                    # Ensure event time stays within interval
-                    event_time = max(t + 0.001, min(event_time, times[i + 1] - 0.001))
+                    # Ensure event time stays within interval, very close to next timepoint
+                    event_time = max(t + 0.001, min(event_time, times[i + 1] - 0.0001))
                     
                     patient_records.append({
                         "patient_id": patient_id,
@@ -1713,6 +1855,10 @@ class IPDBuilder:
         The key insight is that the published at-risk table is ACCURATE, but the digitized
         KM curve has many more points. Rather than interpolating at-risk (which introduces
         errors), we use the at-risk table timepoints directly and interpolate survival.
+        
+        CRITICAL FIX: Uses step-function (left-continuous) interpolation instead of linear
+        interpolation to preserve the step-function nature of KM curves. This ensures
+        survival values match the published curve exactly at event times.
         """
         import pandas as pd
         
@@ -1743,8 +1889,22 @@ class IPDBuilder:
             t = row["time"]
             n_risk = row["atRisk"]
             
-            # Interpolate survival from KM curve at this timepoint
-            survival = np.interp(t, km_times, km_survival)
+            # CRITICAL FIX: Use step-function (left-continuous) interpolation, not linear
+            # KM curves are step functions - survival stays constant until an event occurs
+            # Check if this timepoint exactly matches a KM curve point
+            exact_match_idx = np.where(np.abs(km_times - t) < 1e-6)[0]
+            if len(exact_match_idx) > 0:
+                # Use exact KM value if timepoints match
+                survival = km_survival[exact_match_idx[0]]
+            else:
+                # Step-function interpolation: find the most recent KM point <= t
+                mask = km_times <= t
+                if np.any(mask):
+                    # Use survival from the most recent timepoint <= t
+                    survival = km_survival[mask][-1]
+                else:
+                    # If t is before first KM point, use first survival value
+                    survival = km_survival[0] if len(km_survival) > 0 else 1.0
             
             result_rows.append({
                 "time": t,

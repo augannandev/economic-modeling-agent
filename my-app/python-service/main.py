@@ -592,6 +592,49 @@ async def validate_ipd(request: IPDValidationRequest):
         }
 
 
+@app.post("/plot-ipd-reconstruction")
+async def plot_ipd_reconstruction(request: Dict[str, Any]):
+    """Generate IPD reconstruction comparison plot using R service"""
+    try:
+        from ipd_plotting import plot_ipd_reconstruction_r
+        
+        result = plot_ipd_reconstruction_r(
+            original_times=request.get('original_times', []),
+            original_survival=request.get('original_survival', []),
+            ipd_time=request.get('ipd_time', []),
+            ipd_event=request.get('ipd_event', []),
+            arm_name=request.get('arm_name', 'Arm'),
+            endpoint_type=request.get('endpoint_type', 'OS')
+        )
+        
+        if result is None:
+            raise HTTPException(status_code=500, detail="Failed to generate IPD plot via R service")
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/plot-km-from-ipd")
+async def plot_km_from_ipd(request: Dict[str, Any]):
+    """Generate combined KM plot from IPD data using R service"""
+    try:
+        from ipd_plotting import plot_km_from_ipd_r
+        
+        result = plot_km_from_ipd_r(
+            chemo_time=request.get('chemo_time', []),
+            chemo_event=request.get('chemo_event', []),
+            pembro_time=request.get('pembro_time', []),
+            pembro_event=request.get('pembro_event', []),
+            endpoint_type=request.get('endpoint_type', 'OS')
+        )
+        
+        if result is None:
+            raise HTTPException(status_code=500, detail="Failed to generate KM plot via R service")
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for deployment platforms"""

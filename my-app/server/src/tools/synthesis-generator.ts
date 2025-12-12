@@ -286,6 +286,11 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots
   log_cumulative_hazard?: string; 
   cumulative_hazard?: string;
   schoenfeld?: string;
+  ipd_reconstruction?: {
+    chemo?: string;  // base64 plot
+    pembro?: string; // base64 plot
+  };
+  ipd_km_plot?: string;  // Combined KM plot from IPD data (for demo data)
 }): string {
   let plotsSection = '\n\n---\n\n## Model Diagnostic and Extrapolation Plots\n\n';
   plotsSection += '*Visual assessment of model fit and extrapolation behavior*\n\n';
@@ -310,6 +315,31 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots
       plotsSection += '### Schoenfeld Residuals Plot\n\n';
       plotsSection += '*Assessment of proportional hazards assumption over time.*\n\n';
       plotsSection += `![Schoenfeld Residuals](data:image/png;base64,${diagnosticPlots.schoenfeld})\n\n`;
+    }
+    
+    // Add IPD reconstruction validation plots
+    if (diagnosticPlots.ipd_reconstruction) {
+      plotsSection += '### IPD Reconstruction Validation\n\n';
+      plotsSection += '*Comparison of original Kaplan-Meier curves with reconstructed curves from individual patient data. ';
+      plotsSection += 'These plots validate the accuracy of the IPD reconstruction process used to generate the survival analysis data.*\n\n';
+      
+      if (diagnosticPlots.ipd_reconstruction.chemo) {
+        plotsSection += '#### Chemotherapy Arm\n\n';
+        plotsSection += `![IPD Reconstruction - Chemotherapy](data:image/png;base64,${diagnosticPlots.ipd_reconstruction.chemo})\n\n`;
+      }
+      
+      if (diagnosticPlots.ipd_reconstruction.pembro) {
+        plotsSection += '#### Pembrolizumab Arm\n\n';
+        plotsSection += `![IPD Reconstruction - Pembrolizumab](data:image/png;base64,${diagnosticPlots.ipd_reconstruction.pembro})\n\n`;
+      }
+    }
+    
+    // Add IPD KM plot (for demo data)
+    if (diagnosticPlots.ipd_km_plot) {
+      plotsSection += '### IPD Data Kaplan-Meier Curves\n\n';
+      plotsSection += '*Kaplan-Meier survival curves generated from the reconstructed individual patient data. ';
+      plotsSection += 'This plot shows the survival experience of both treatment arms based on the IPD data used for this analysis.*\n\n';
+      plotsSection += `![IPD KM Curves](data:image/png;base64,${diagnosticPlots.ipd_km_plot})\n\n`;
     }
   }
   
