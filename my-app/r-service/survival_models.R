@@ -108,7 +108,7 @@ fit_parametric <- function(req) {
 
   tryCatch(
     {
-      surv_obj <- Surv(time = time, event = event)
+      surv_obj <- Surv(time = time, event = event) # nolint: object_usage_linter
       fit <- flexsurvreg(surv_obj ~ 1, dist = flexsurv_dist)
 
       # Extract parameters
