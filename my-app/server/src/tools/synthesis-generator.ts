@@ -3,6 +3,7 @@ import { HumanMessage } from '@langchain/core/messages';
 import { NICE_DSU_TSD_14_PRINCIPLES, NICE_DSU_TSD_21_PRINCIPLES } from '../lib/nice-guidelines';
 import { getRAGService, getSimpleRAGContext } from '../lib/rag-service';
 import { formatMarkdown } from '../lib/markdown-formatter';
+import { EXTERNAL_BENCHMARKS } from '../lib/external-benchmarks';
 import type { ChowTestResult } from '../services/python-service';
 import path from 'path';
 import fs from 'fs';
@@ -41,6 +42,10 @@ interface ModelAssessment {
     year2?: number;
     year5?: number;
     year10?: number;
+  };
+  computed_predictions?: {
+    "60"?: number;
+    "120"?: number;
   };
   recommendation?: 'Base Case' | 'Scenario' | 'Screen Out';
   red_flags?: string[];
@@ -95,29 +100,29 @@ function getFullSourceTitle(source: string): string {
 async function getSynthesisRAGContext(indication?: string): Promise<{ context: string; sources: RAGSource[] }> {
   const sources: RAGSource[] = [];
   let sourceId = 1;
-  
+
   try {
     const ragService = getRAGService();
-    
+
     // Query for NICE methodology (TSD14, TSD16)
     const methodologyResults = await ragService.query(
       'NICE TSD14 survival extrapolation model selection criteria uncertainty',
       5
     );
-    
+
     // Query for benchmarks
-    const benchmarkResults = indication 
+    const benchmarkResults = indication
       ? await ragService.query(`${indication} survival benchmark external data 5-year 10-year`, 3)
       : [];
-    
+
     let context = '';
-    
+
     if (methodologyResults.length > 0) {
       context += '## NICE Methodology Guidance\n\n';
       for (const result of methodologyResults) {
         const shortName = getShortSourceName(result.source);
         const existingSource = sources.find(s => s.shortName === shortName);
-        
+
         if (!existingSource) {
           sources.push({
             id: String(sourceId++),
@@ -126,17 +131,17 @@ async function getSynthesisRAGContext(indication?: string): Promise<{ context: s
             fullName: getFullSourceTitle(result.source)
           });
         }
-        
+
         context += `**[${shortName}]**\n${result.content}\n\n`;
       }
     }
-    
+
     if (benchmarkResults.length > 0) {
       context += '\n## External Benchmark Data\n\n';
       for (const result of benchmarkResults) {
         const shortName = getShortSourceName(result.source);
         const existingSource = sources.find(s => s.shortName === shortName);
-        
+
         if (!existingSource) {
           sources.push({
             id: String(sourceId++),
@@ -145,20 +150,20 @@ async function getSynthesisRAGContext(indication?: string): Promise<{ context: s
             fullName: getFullSourceTitle(result.source)
           });
         }
-        
+
         context += `**[${shortName}]**\n${result.content}\n\n`;
       }
     }
-    
+
     return { context, sources };
   } catch (error) {
     console.warn('[SynthesisGenerator] RAG query failed, using fallback:', error);
-    
+
     // Fallback to simple file-based context
     try {
       const ragDir = path.join(process.cwd(), 'data', 'rag_docs');
       const simpleContext = await getSimpleRAGContext(ragDir, 'TSD survival model selection');
-      return { 
+      return {
         context: `## Methodology Context\n\n${simpleContext}`,
         sources: [{ id: '1', source: 'TSD14', shortName: 'TSD14', fullName: 'NICE DSU TSD14' }]
       };
@@ -175,19 +180,39 @@ function buildModelSummaryTable(models: ModelAssessment[], arm: string): string 
   const armModels = models
     .filter(m => m.arm === arm)
     .sort((a, b) => a.aic - b.aic);
-  
+
   if (armModels.length === 0) return '*No models for this arm*';
-  
+
   let table = '| Model | AIC | Fit | Extrap | 5yr | Decision |\n';
   table += '| --- | --- | --- | --- | --- | --- |\n';
-  
+
   for (const m of armModels) {
-    const year5 = m.extracted_predictions?.year5 
-      ? `${(m.extracted_predictions.year5 * 100).toFixed(0)}%` 
-      : 'N/A';
-    table += `| ${m.distribution || m.approach} | ${m.aic.toFixed(0)} | ${m.vision_scores.short_term}/10 | ${m.vision_scores.long_term}/10 | ${year5} | ${m.recommendation || 'TBD'} |\n`;
+    // Prefer computed predictions, fall back to extracted
+    let year5 = 'N/A';
+    let year10 = 'N/A';
+
+    if (m.computed_predictions?.['60']) {
+      year5 = `${(m.computed_predictions['60'] * 100).toFixed(1)}%`;
+    } else if (m.extracted_predictions?.year5) {
+      year5 = `~${(m.extracted_predictions.year5 * 100).toFixed(0)}% (est)`;
+    }
+
+    if (m.computed_predictions?.['120']) {
+      year10 = `${(m.computed_predictions['120'] * 100).toFixed(1)}%`;
+    }
+
+    let extrapFlag = '';
+    // Check constraints if possible (simple check for hard max to flag)
+    if (m.computed_predictions?.['60']) {
+      const benchmarks = EXTERNAL_BENCHMARKS[arm as keyof typeof EXTERNAL_BENCHMARKS];
+      if (benchmarks && m.computed_predictions['60'] > benchmarks['5y'].hard_max) {
+        extrapFlag = ' ⚠️ HIGH';
+      }
+    }
+
+    table += `| ${m.distribution || m.approach} | ${m.aic.toFixed(0)} | ${m.vision_scores.short_term}/10 | ${m.vision_scores.long_term}/10 | ${year5}${extrapFlag} | ${m.recommendation || 'TBD'} |\n`;
   }
-  
+
   return table;
 }
 
@@ -206,19 +231,19 @@ function buildApproachComparisonTable(models: ModelAssessment[], approach: strin
   const approachModels = models
     .filter(m => normalizeApproach(m.approach) === normalizedApproach)
     .sort((a, b) => a.aic - b.aic);
-  
+
   if (approachModels.length === 0) return `*No ${approach} models available*`;
-  
+
   let table = `### ${approach} Models Comparison\n\n`;
   table += '| Model | Arm | AIC | BIC | Fit Score | Extrap Score | Recommendation |\n';
   table += '|-------|-----|-----|-----|-----------|--------------|----------------|\n';
-  
+
   for (const m of approachModels) {
     const distribution = m.distribution || 'N/A';
     const armLabel = m.arm === 'chemo' ? 'Chemo' : 'Pembro';
     table += `| ${distribution} | ${armLabel} | ${m.aic.toFixed(2)} | ${m.bic.toFixed(2)} | ${m.vision_scores.short_term}/10 | ${m.vision_scores.long_term}/10 | ${m.recommendation || 'TBD'} |\n`;
   }
-  
+
   return table;
 }
 
@@ -238,10 +263,10 @@ function buildAllComparisonTables(models: ModelAssessment[]): string {
  */
 function generateReferencesSection(sources: RAGSource[]): string {
   if (sources.length === 0) return '';
-  
+
   let refs = '\n\n---\n\n## References\n\n';
   refs += '*The following sources were consulted during this analysis:*\n\n';
-  
+
   for (const source of sources) {
     // Format with citation number, italicized title, and description
     const url = getSourceUrl(source.source);
@@ -251,7 +276,7 @@ function generateReferencesSection(sources: RAGSource[]): string {
       refs += `**[${source.id}]** *${source.fullName}*\n\n`;
     }
   }
-  
+
   refs += '\n*Note: Citations marked with [n] correspond to the reference numbers above.*\n';
   return refs;
 }
@@ -282,8 +307,8 @@ interface ExtendedModelAssessment extends ModelAssessment {
  * Generate embedded plots section for base case models
  * Includes survival extrapolation plots and diagnostic plots
  */
-function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots?: { 
-  log_cumulative_hazard?: string; 
+function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots?: {
+  log_cumulative_hazard?: string;
   cumulative_hazard?: string;
   schoenfeld?: string;
   ipd_reconstruction?: {
@@ -294,7 +319,7 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots
 }): string {
   let plotsSection = '\n\n---\n\n## Model Diagnostic and Extrapolation Plots\n\n';
   plotsSection += '*Visual assessment of model fit and extrapolation behavior*\n\n';
-  
+
   // Add diagnostic plots first (if available)
   if (diagnosticPlots) {
     if (diagnosticPlots.log_cumulative_hazard) {
@@ -303,37 +328,37 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots
       plotsSection += 'Parallel lines suggest PH holds; diverging lines indicate time-varying hazard ratios.*\n\n';
       plotsSection += `![Log-Cumulative Hazard](data:image/png;base64,${diagnosticPlots.log_cumulative_hazard})\n\n`;
     }
-    
+
     if (diagnosticPlots.cumulative_hazard) {
       plotsSection += '### Cumulative Hazard Plot\n\n';
       plotsSection += '*Cumulative hazard over time for each arm. Linear shape suggests exponential model; ';
       plotsSection += 'curvature indicates Weibull or other flexible distributions may be more appropriate.*\n\n';
       plotsSection += `![Cumulative Hazard](data:image/png;base64,${diagnosticPlots.cumulative_hazard})\n\n`;
     }
-    
+
     if (diagnosticPlots.schoenfeld) {
       plotsSection += '### Schoenfeld Residuals Plot\n\n';
       plotsSection += '*Assessment of proportional hazards assumption over time.*\n\n';
       plotsSection += `![Schoenfeld Residuals](data:image/png;base64,${diagnosticPlots.schoenfeld})\n\n`;
     }
-    
+
     // Add IPD reconstruction validation plots
     if (diagnosticPlots.ipd_reconstruction) {
       plotsSection += '### IPD Reconstruction Validation\n\n';
       plotsSection += '*Comparison of original Kaplan-Meier curves with reconstructed curves from individual patient data. ';
       plotsSection += 'These plots validate the accuracy of the IPD reconstruction process used to generate the survival analysis data.*\n\n';
-      
+
       if (diagnosticPlots.ipd_reconstruction.chemo) {
         plotsSection += '#### Chemotherapy Arm\n\n';
         plotsSection += `![IPD Reconstruction - Chemotherapy](data:image/png;base64,${diagnosticPlots.ipd_reconstruction.chemo})\n\n`;
       }
-      
+
       if (diagnosticPlots.ipd_reconstruction.pembro) {
         plotsSection += '#### Pembrolizumab Arm\n\n';
         plotsSection += `![IPD Reconstruction - Pembrolizumab](data:image/png;base64,${diagnosticPlots.ipd_reconstruction.pembro})\n\n`;
       }
     }
-    
+
     // Add IPD KM plot (for demo data)
     if (diagnosticPlots.ipd_km_plot) {
       plotsSection += '### IPD Data Kaplan-Meier Curves\n\n';
@@ -342,33 +367,33 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots
       plotsSection += `![IPD KM Curves](data:image/png;base64,${diagnosticPlots.ipd_km_plot})\n\n`;
     }
   }
-  
+
   // Add base case model plots
   const modelsWithPlots = baseCaseModels.filter(m => m.plots?.short_term_base64 || m.plots?.long_term_base64);
-  
+
   if (modelsWithPlots.length > 0) {
     plotsSection += '### Base Case Model Extrapolations\n\n';
-    
+
     for (const model of modelsWithPlots) {
       const armLabel = model.arm === 'chemo' ? 'Chemotherapy' : 'Pembrolizumab';
       plotsSection += `#### ${armLabel} — ${model.distribution || model.approach}\n\n`;
-      
+
       if (model.plots?.short_term_base64) {
         plotsSection += `**Short-term Fit (Observed Period)**\n\n`;
         plotsSection += `![${armLabel} Short-term Fit](data:image/png;base64,${model.plots.short_term_base64})\n\n`;
       }
-      
+
       if (model.plots?.long_term_base64) {
         plotsSection += `**Long-term Extrapolation**\n\n`;
         plotsSection += `![${armLabel} Long-term Extrapolation](data:image/png;base64,${model.plots.long_term_base64})\n\n`;
       }
     }
   }
-  
+
   if (!diagnosticPlots && modelsWithPlots.length === 0) {
     return ''; // No plots to show
   }
-  
+
   return plotsSection;
 }
 
@@ -383,13 +408,13 @@ function loadCutpointClinicalContext(): string {
       '/app/data/rag_docs/cutpoint_clinical_context.md',  // Docker/Railway
       path.join(__dirname, '..', 'data', 'rag_docs', 'cutpoint_clinical_context.md'),
     ];
-    
+
     for (const p of possiblePaths) {
       if (fs.existsSync(p)) {
         return fs.readFileSync(p, 'utf-8');
       }
     }
-    
+
     console.warn('[SynthesisGenerator] Clinical context file not found, using fallback');
     return '## Clinical Context\nNo clinical context available.';
   } catch (error) {
@@ -406,7 +431,7 @@ export async function generateCutpointJustification(
 ): Promise<string> {
   const llm = createReasoningLLM();
   const clinicalContext = loadCutpointClinicalContext();
-  
+
   // Format cutpoint analysis as JSON for the prompt
   const cutpointAnalysis = {
     chemotherapy: {
@@ -482,7 +507,7 @@ Generate justification for each arm with a structure similar to this:
   const messages = [new HumanMessage({ content: prompt })];
   const response = await llm.invoke(messages);
   let content = response.content as string;
-  
+
   // Format and return
   return formatMarkdown(content);
 }
@@ -539,6 +564,10 @@ Total models analyzed: ${allModelAssessments.length}
 ## RAG CONTEXT (Methodology & Benchmarks)
 
 ${ragContext}
+
+## EXTERNAL BENCHMARKS (Validation Data)
+Use these to validate model extrapolations. Models violating "Hard Max" should be penalized heavily.
+${JSON.stringify(EXTERNAL_BENCHMARKS, null, 2)}
 
 ## MODEL SUMMARY BY ARM
 
@@ -748,7 +777,7 @@ function extractSection(text: string, startMarker: string, endMarker: string): s
 
 function extractApproachRankings(text: string): Record<string, unknown> {
   const rankings: Record<string, unknown> = {};
-  
+
   const approaches = ['One-piece', 'Piecewise', 'Spline'];
   for (const approach of approaches) {
     const section = extractSection(text, `**${approach}`, '**');
@@ -756,7 +785,7 @@ function extractApproachRankings(text: string): Record<string, unknown> {
       rankings[approach] = section;
     }
   }
-  
+
   return rankings;
 }
 

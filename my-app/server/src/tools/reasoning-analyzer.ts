@@ -4,6 +4,7 @@ import { NICE_DSU_EVALUATION_PROMPT, NICE_DSU_TSD_14_PRINCIPLES, NICE_DSU_TSD_21
 import type { VisionAssessmentResult } from './vision-analyzer';
 import type { ModelFitResult } from '../services/python-service';
 import { getRAGService, getSimpleRAGContext } from '../lib/rag-service';
+import { EXTERNAL_BENCHMARKS } from '../lib/external-benchmarks';
 import path from 'path';
 
 export interface ReasoningAssessmentResult {
@@ -44,19 +45,19 @@ async function getModelRAGContext(
 ): Promise<string> {
   try {
     const ragService = getRAGService();
-    
+
     // Query for methodology guidance
     const methodologyContext = await ragService.queryMethodology(
       distribution,
       `${approach} extrapolation plausibility`
     );
-    
+
     // Query for benchmarks if indication provided
     let benchmarkContext = '';
     if (indication) {
       benchmarkContext = await ragService.queryBenchmarks(indication, 'overall');
     }
-    
+
     if (methodologyContext || benchmarkContext) {
       return `
 ## RAG CONTEXT (Methodology & Benchmarks)
@@ -66,11 +67,11 @@ ${methodologyContext ? `### Methodology Guidance\n${methodologyContext}` : ''}
 ${benchmarkContext ? `### External Benchmarks\n${benchmarkContext}` : ''}
 `;
     }
-    
+
     return '';
   } catch (error) {
     console.warn('[ReasoningAnalyzer] RAG query failed, using fallback:', error);
-    
+
     // Fallback to simple file-based context
     try {
       const ragDir = path.join(process.cwd(), 'data', 'rag_docs');
@@ -109,7 +110,7 @@ export async function assessWithReasoningLLM(
   const fitScore = visionAssessment.short_term_score;
   const extrapScore = visionAssessment.long_term_score;
   const aicRank = (modelResult as any).aicRank || 'N/A';
-  
+
   // Extract predictions for comparison
   const predictions = visionAssessment.extracted_predictions || {};
   const benchmarkComparison = visionAssessment.benchmark_comparison || {
@@ -117,8 +118,49 @@ export async function assessWithReasoningLLM(
     notes: 'No benchmark data'
   };
 
+  // Quantitative Validation against Benchmarks
+  let quantValidation = '';
+  const arm = modelResult.arm as keyof typeof EXTERNAL_BENCHMARKS;
+  const benchmarks = EXTERNAL_BENCHMARKS[arm];
+
+  if (benchmarks && modelResult.predictions) {
+    quantValidation += '\n**Quantitative Benchmark Validation:**\n';
+
+    // Check 5y
+    if (modelResult.predictions['60']) {
+      const pred5y = modelResult.predictions['60'];
+      const b5y = benchmarks['5y'];
+      let status = '✅ PASS';
+
+      if (b5y.hard_max && pred5y > b5y.hard_max) {
+        status = '⚠️ HARD MAX VIOLATION (Downgrade Extrapolation Score)';
+      } else if (pred5y < b5y.range[0] || pred5y > b5y.range[1]) {
+        status = '⚠️ Outside Expected Range';
+      }
+
+      quantValidation += `- 5y Computed OS: ${(pred5y * 100).toFixed(1)}% vs Range ${(b5y.range[0] * 100).toFixed(0)}-${(b5y.range[1] * 100).toFixed(0)}% (Max ${(b5y.hard_max || 0) * 100}%) -> ${status}\n`;
+    }
+
+    // Check 10y
+    if (modelResult.predictions['120']) {
+      const pred10y = modelResult.predictions['120'];
+      const b10y = benchmarks['10y'];
+      let status = '✅ PASS';
+
+      if (pred10y < b10y.range[0] || pred10y > b10y.range[1]) {
+        status = '⚠️ Outside Expected Range';
+      }
+
+      quantValidation += `- 10y Computed OS: ${(pred10y * 100).toFixed(1)}% vs Range ${(b10y.range[0] * 100).toFixed(0)}-${(b10y.range[1] * 100).toFixed(0)}% -> ${status}\n`;
+    }
+  }
+
   // Build concise prompt (per plan: 200 words output)
   const prompt = `You are a senior health economist synthesizing vision analysis for a survival model.
+  
+  CRITICAL: You must incorporate the "Quantitative Benchmark Validation" below into your scoring and reasoning.
+  - If a model violates a HARD MAX, you MUST downgrade the Extrapolation score significantly (<5) and mark as "Screen Out" or "Scenario" (unless fit is exceptional).
+  - If a model is outside the expected range, note it as a weakness.
 
 ## INPUT DATA (DO NOT REPEAT - SUMMARIZE ONLY)
 
@@ -130,7 +172,9 @@ export async function assessWithReasoningLLM(
 - Late (18mo+): ${visionAssessment.observations?.late?.fit_quality || 'N/A'}
 - Extrapolation: ${visionAssessment.observations?.extrapolation?.trajectory || 'N/A'}
 
-**Predictions Extracted:**
+${quantValidation}
+
+**Predictions Extracted (Visual):**
 ${predictions.year5 !== undefined ? `- 5yr: ${(predictions.year5 * 100).toFixed(1)}%` : ''}
 ${predictions.year10 !== undefined ? `- 10yr: ${(predictions.year10 * 100).toFixed(1)}%` : ''}
 
@@ -200,7 +244,7 @@ function parseReasoningResponse(content: string): ReasoningAssessmentResult['sec
   const extractSection = (text: string, marker: string, endMarkers: string[]): string => {
     const startIdx = text.indexOf(marker);
     if (startIdx === -1) return '';
-    
+
     let endIdx = text.length;
     for (const endMarker of endMarkers) {
       const idx = text.indexOf(endMarker, startIdx + marker.length);
@@ -208,7 +252,7 @@ function parseReasoningResponse(content: string): ReasoningAssessmentResult['sec
         endIdx = idx;
       }
     }
-    
+
     return text.substring(startIdx + marker.length, endIdx).trim();
   };
 
@@ -222,7 +266,7 @@ function parseReasoningResponse(content: string): ReasoningAssessmentResult['sec
   const extrapolation = extractSection(content, '**Extrapolation', ['**Strengths', '**Weaknesses']);
   const strengthsText = extractSection(content, '**Strengths', ['**Weaknesses', '**Decision', '**Recommendation']);
   const weaknessesText = extractSection(content, '**Weaknesses', ['**Decision', '**Recommendation']);
-  
+
   // Try both "Decision" and "Recommendation" headers
   let decisionText = extractSection(content, '**Decision', []);
   if (!decisionText) {

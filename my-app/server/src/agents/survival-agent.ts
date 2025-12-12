@@ -867,6 +867,10 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
       short_term_base64: model.plots.short_term?.base64_data,
       long_term_base64: model.plots.long_term?.base64_data,
     } : undefined,
+    computed_predictions: model.model_result.predictions ? {
+      "60": model.model_result.predictions["60"],
+      "120": model.model_result.predictions["120"]
+    } : undefined,
   }));
 
   // Process diagnostic plots - load from file if needed

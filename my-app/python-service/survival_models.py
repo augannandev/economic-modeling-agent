@@ -61,7 +61,12 @@ def fit_spline_model(data: Dict, arm: str, scale: str, knots: int) -> Dict:
             "parameters": params,
             "aic": aic,
             "bic": bic,
-            "log_likelihood": log_likelihood
+            "bic": bic,
+            "log_likelihood": log_likelihood,
+            "predictions": {
+                "60": float(fitter.predict_survival(60).item() if hasattr(fitter.predict_survival(60), 'item') else fitter.predict_survival(60)),
+                "120": float(fitter.predict_survival(120).item() if hasattr(fitter.predict_survival(120), 'item') else fitter.predict_survival(120))
+            }
         }
     except Exception as e:
         # Log the error for debugging
@@ -164,6 +169,10 @@ def fit_one_piece_model(data: Dict, arm: str, distribution: str) -> Dict:
         "parameters": params,
         "aic": float(aic) if aic is not None else None,
         "bic": float(bic) if bic is not None else None,
-        "log_likelihood": float(log_likelihood) if log_likelihood is not None else None
+        "log_likelihood": float(log_likelihood) if log_likelihood is not None else None,
+        "predictions": {
+            "60": float(fitter.predict_survival_function(60).item() if hasattr(fitter.predict_survival_function(60), 'item') else fitter.predict_survival_function(60)),
+            "120": float(fitter.predict_survival_function(120).item() if hasattr(fitter.predict_survival_function(120), 'item') else fitter.predict_survival_function(120))
+        }
     }
 

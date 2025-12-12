@@ -158,9 +158,100 @@ def fit_piecewise_model(data: Dict, arm: str, distribution: str, cutpoint: float
         distribution
     )
     
-    # Update model result with cutpoint
+    # Calculate predictions
+    # S(t) = S_km(cutpoint) * S_parametric(t - cutpoint)
+    # S_parametric(0) = 1
+    
+    # Get KM survival at cutpoint
+    # Use the KM fitter from pre-period
+    try:
+        prob_at_cutpoint = float(kmf.predict(cutpoint))
+    except:
+        prob_at_cutpoint = float(kmf.survival_function_.iloc[-1].iloc[0]) if not kmf.survival_function_.empty else 0.0
+
+    predictions = {}
+    for t in [60, 120]:
+        if t <= cutpoint:
+            # Use KM prediction directly if t <= cutpoint (unlikely for extrapolation task but possible)
+            pred = float(kmf.predict(t))
+        else:
+            # Extrapolate
+            t_adj = t - cutpoint
+            # Get parametric survival
+            # We need the fitter object, but fit_one_piece_model returns a dict.
+            # Ideally we refit or extract params. 
+            # But fit_one_piece_model returns predictions for the adjusted time frame!
+            # Let's extract them from model_result if we can trust it matches our t_adj
+            # But model_result['predictions'] used t=60 and t=120 on the ADJUSTED timeline.
+            # That corresponds to t_total = 60 + cutpoint. Not what we want.
+            
+            # We need S_parametric(t - cutpoint).
+            # S_parametric(t) = exp(-(t/scale)^shape) etc.
+            # This is hard to do generically without the fitter object.
+            # Better approach: Pass specific times to fit_one_piece_model? 
+            # No, fit_one_piece_model interface is fixed.
+            
+            # Use the 'predictions' from model_result?
+            # model_result['predictions']['60'] is S_param(60). This is S(cutpoint + 60) for the whole model.
+            # So predictions['60'] corresponds to t_total = cutpoint + 60.
+            
+            # This is tricky.
+            # Re-instantiate the fitter?
+            pass
+
+    # REVISED STRATEGY: 
+    # Since we can't easily access the fitter object from fit_one_piece_model result,
+    # and we don't want to duplicate distributions logic.
+    # We will assume that for extrapolation, t > cutpoint.
+    # We can reconstruct the parametric curve if we know the distribution and parameters.
+    # OR simpler: The fit_one_piece_model function just returned. It calculated predictions.
+    # But those predictions are for t=60 and t=120 relative to the START of the parametric segment!
+    # i.e., t_adj = 60 => t_real = cutpoint + 60.
+    
+    # We want prediction for t_real = 60.
+    # t_adj = 60 - cutpoint.
+    # If cutpoint < 60, we need S_param(60 - cutpoint).
+    # The default fit_one_piece_model predicts at 60 and 120.
+    # If cutpoint is e.g. 20 weeks (~4.6 months), then:
+    # We have S_param(60) -> survival 60 months AFTER cutpoint (t=64.6).
+    # We have S_param(120) -> survival 120 months AFTER cutpoint (t=124.6).
+    
+    # This is not exactly what we want.
+    # However, since we are editing the files, we can modify fit_one_piece_model to accept custom prediction times!
+    # But fit_one_piece_model signature is fixed in the endpoint.
+    
+    # Let's import the Fitter classes and recalculate.
+    from lifelines import ExponentialFitter, WeibullFitter, LogNormalFitter, LogLogisticFitter, GeneralizedGammaFitter
+    from custom_gompertz import GompertzFitter
+    
+    fitters = {
+        'exponential': ExponentialFitter,
+        'weibull': WeibullFitter,
+        'log-normal': LogNormalFitter,
+        'log-logistic': LogLogisticFitter,
+        'gompertz': GompertzFitter,
+        'generalized-gamma': GeneralizedGammaFitter
+    }
+    
+    Fitter = fitters[distribution]
+    fitter = Fitter()
+    
+    # Re-fit the parametric part locally to get the fitter object
+    # (Fast enough)
+    fitter.fit(post_data_adjusted['time'], post_data_adjusted['event'])
+    
+    predictions = {}
+    for t in [60, 120]:
+        if t <= cutpoint:
+             predictions[str(t)] = float(kmf.predict(t))
+        else:
+             t_adj = t - cutpoint
+             s_param = float(fitter.predict_survival_function(t_adj).item() if hasattr(fitter.predict_survival_function(t_adj), 'item') else fitter.predict_survival_function(t_adj))
+             predictions[str(t)] = prob_at_cutpoint * s_param
+
     model_result["cutpoint"] = cutpoint
     model_result["approach"] = "piecewise"
+    model_result["predictions"] = predictions
     
     return model_result
 

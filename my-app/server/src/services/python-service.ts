@@ -27,6 +27,7 @@ export interface ModelFitResult {
   aic?: number;
   bic?: number;
   log_likelihood: number;
+  predictions?: Record<string, number>;
 }
 
 export interface PlotResult {

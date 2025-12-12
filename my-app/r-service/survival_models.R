@@ -45,7 +45,7 @@ fit_gompertz <- function(req) {
   tryCatch(
     {
       # Create survival object
-      surv_obj <- Surv(time = time, event = event)  # nolint: object_usage_linter
+      surv_obj <- Surv(time = time, event = event) # nolint: object_usage_linter
 
       # Fit Gompertz model using flexsurv
       fit <- flexsurvreg(surv_obj ~ 1, dist = "gompertz")
@@ -90,17 +90,17 @@ fit_rp_spline <- function(req) {
 
   tryCatch(
     {
-      # Create survival object
-      surv_obj <- Surv(time = time, event = event)  # nolint
+      # Create data frame for fitting to ensure consistent variable names
+      df_model <- data.frame(time = time, event = event)
 
       # Fit Royston-Parmar model using rstpm2
       # rstpm2 provides better implementation than Python's CRCSplineFitter
       if (scale == "hazard") {
-        fit <- stpm2(surv_obj ~ 1, df = knots + 1)
+        fit <- stpm2(Surv(time, event) ~ 1, data = df_model, df = knots + 1)
       } else if (scale == "odds") {
-        fit <- stpm2(surv_obj ~ 1, df = knots + 1, link.type = "odds")
+        fit <- stpm2(Surv(time, event) ~ 1, data = df_model, df = knots + 1, link.type = "odds")
       } else if (scale == "normal") {
-        fit <- stpm2(surv_obj ~ 1, df = knots + 1, link.type = "normal")
+        fit <- stpm2(Surv(time, event) ~ 1, data = df_model, df = knots + 1, link.type = "normal")
       } else {
         stop(paste("Unknown scale:", scale))
       }
@@ -123,7 +123,11 @@ fit_rp_spline <- function(req) {
         bic = as.numeric(bic),
         log_likelihood = as.numeric(log_lik),
         survival_times = times_pred,
-        survival_probs = as.numeric(surv_pred)
+        survival_probs = as.numeric(surv_pred),
+        predictions = list(
+          "60" = as.numeric(predict(fit, newdata = data.frame(time = 60), type = "surv")),
+          "120" = as.numeric(predict(fit, newdata = data.frame(time = 120), type = "surv"))
+        )
       )
 
       return(result)
@@ -147,7 +151,7 @@ refit_and_predict <- function(req) {
 
   tryCatch(
     {
-      surv_obj <- Surv(time = time, event = event)  # nolint
+      surv_obj <- Surv(time = time, event = event) # nolint
 
       if (model_type == "gompertz") {
         fit <- flexsurvreg(surv_obj ~ 1, dist = "gompertz")
@@ -409,7 +413,7 @@ plot_ipd_reconstruction <- function(req) {
       endpoint_type <- if (is.null(body$endpoint_type)) "OS" else body$endpoint_type
 
       # Create survival object from reconstructed IPD
-      surv_obj <- Surv(time = ipd_time, event = ipd_event)  # nolint
+      surv_obj <- Surv(time = ipd_time, event = ipd_event) # nolint
 
       # Fit Kaplan-Meier curve to reconstructed IPD
       km_fit <- survfit(surv_obj ~ 1)
@@ -524,7 +528,7 @@ plot_km_from_ipd <- function(req) {
       )
 
       # Fit KM curves
-      surv_obj <- Surv(time = all_data$time, event = all_data$event)  # nolint
+      surv_obj <- Surv(time = all_data$time, event = all_data$event) # nolint
       fit <- survfit(surv_obj ~ arm, data = all_data)
 
       # Calculate log-rank test p-value
@@ -537,7 +541,7 @@ plot_km_from_ipd <- function(req) {
 
       # Try to use survminer for enhanced plots
       has_survminer <- requireNamespace("survminer", quietly = TRUE)
-      
+
       if (has_survminer) {
         library(survminer)
         # survminer loads ggplot2, so theme_minimal is available
@@ -552,7 +556,7 @@ plot_km_from_ipd <- function(req) {
           ylab = "Overall Survival Probability",
           title = paste0("Kaplan-Meier Curves from Reconstructed IPD (", endpoint_type, ")"),
           palette = c("red", "blue"),
-          ggtheme = ggplot2::theme_minimal(),  # nolint
+          ggtheme = ggplot2::theme_minimal(), # nolint
           risk.table.height = 0.25,
           fontsize = 4
         )
@@ -578,7 +582,8 @@ plot_km_from_ipd <- function(req) {
           cex = 1.1
         )
         # Add p-value text
-        text(x = max(all_data$time) * 0.7, y = 0.2,
+        text(
+          x = max(all_data$time) * 0.7, y = 0.2,
           labels = paste0("Log-rank p = ", format.pval(p_value, digits = 3)),
           cex = 1.0
         )
