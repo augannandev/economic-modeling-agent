@@ -1,0 +1,17 @@
+endpoint,arm,time_months,n_risk
+OS,Pembrolizumab,0.0,154
+OS,Pembrolizumab,3.0,136
+OS,Pembrolizumab,6.0,121
+OS,Pembrolizumab,9.0,82
+OS,Pembrolizumab,12.0,39
+OS,Pembrolizumab,15.0,11
+OS,Pembrolizumab,18.0,2
+OS,Pembrolizumab,21.0,0
+OS,Chemotherapy,0.0,151
+OS,Chemotherapy,3.0,123
+OS,Chemotherapy,6.0,106
+OS,Chemotherapy,9.0,64
+OS,Chemotherapy,12.0,34
+OS,Chemotherapy,15.0,7
+OS,Chemotherapy,18.0,1
+OS,Chemotherapy,21.0,0

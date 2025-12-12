@@ -5,9 +5,9 @@ import pandas as pd
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from .base import BaseAgent
-from ..models.schemas import AtRiskPoint, KMPoint, RunStatus
-from ..utils.blackboard import BlackboardManager
+from .base import BaseAgent  # type: ignore
+from ..models.schemas import AtRiskPoint, KMPoint, RunStatus  # type: ignore
+from ..utils.blackboard import BlackboardManager  # type: ignore
 
 
 class IPDBuilderAgent(BaseAgent):
@@ -90,6 +90,14 @@ class IPDBuilderAgent(BaseAgent):
     ) -> pd.DataFrame:
         """Reconstruct individual patient data using Guyot et al. 2012 method.
         
+        CRITICAL FIXES APPLIED:
+        1. Step-function interpolation: Uses left-continuous interpolation to preserve
+           KM curve step-function nature (survival stays constant until events occur)
+        2. Event timing: Places events very close to timepoints (80-99% of interval)
+           to match when survival actually drops in step functions
+        3. Exact matching: Uses exact KM values when at-risk table timepoints match
+           KM curve timepoints exactly
+        
         Args:
             km_points: Kaplan-Meier survival points
             atrisk_points: Number at risk points
@@ -139,13 +147,25 @@ class IPDBuilderAgent(BaseAgent):
             t_next, s_next, nr_next = times[i + 1], survival[i + 1], n_risk[i + 1]
             
             # Number of events in interval [t_curr, t_next)
-            if s_curr > 0:
+            # Guyot formula: d = n_risk * (1 - S(t_next) / S(t_curr))
+            # This assumes survival changes linearly, but for step functions we need to be careful
+            if s_curr > 0 and s_next < s_curr:
+                # Standard Guyot formula - valid for step functions
                 d = nr_curr * (1 - s_next / s_curr)
+            elif s_curr > 0:
+                # No survival drop (s_next >= s_curr) - no events, only censoring
+                d = 0
             else:
+                # Already at 0 survival - no more events possible
                 d = 0
             
             # Number censored in interval
+            # c = n_risk(t_curr) - n_risk(t_next) - events
             c = nr_curr - nr_next - d
+            
+            # Ensure non-negative values (rounding can cause small negatives)
+            d = max(0, d)
+            c = max(0, c)
             
             n_events.append(max(0, round(d)))
             n_censored.append(max(0, round(c)))
@@ -174,17 +194,17 @@ class IPDBuilderAgent(BaseAgent):
                 interval_length = times[i + 1] - t
                 
                 # IMPROVED EVENT TIMING:
-                # Place events in the LATTER half of the interval (closer to the step drop)
-                # This better matches how KM step functions work - the survival drops
-                # at the time of the event, so events should be placed just before the next timepoint
+                # Place events RIGHT BEFORE the next timepoint to match step function behavior
+                # In KM curves, survival drops at event times, so events should occur
+                # just before the timepoint where survival drops
                 for j in range(n_evt):
-                    # Distribute events in the latter 60% of interval with some spread
-                    # This prevents all events from bunching at exactly the same time
-                    base_offset = 0.4 + 0.5 * (j / max(1, n_evt))  # Range: 0.4 to 0.9 of interval
-                    small_jitter = np.random.uniform(-0.05, 0.05) * interval_length
+                    # Place events in the last 20% of interval, very close to next timepoint
+                    # This ensures survival drops occur at the correct timepoint
+                    base_offset = 0.8 + 0.19 * (j / max(1, n_evt))  # Range: 0.8 to 0.99 of interval
+                    small_jitter = np.random.uniform(-0.01, 0.01) * interval_length
                     event_time = t + (base_offset * interval_length) + small_jitter
-                    # Ensure event time stays within interval
-                    event_time = max(t + 0.001, min(event_time, times[i + 1] - 0.001))
+                    # Ensure event time stays within interval, very close to next timepoint
+                    event_time = max(t + 0.001, min(event_time, times[i + 1] - 0.0001))
                     
                     patient_records.append({
                         "patient_id": patient_id,
@@ -257,21 +277,34 @@ class IPDBuilderAgent(BaseAgent):
         arm_name = km_df_sorted["arm"].iloc[0]
         endpoint = km_df_sorted["endpoint"].iloc[0]
         
-        # Extract KM curve data for interpolation
+        # Extract KM curve data for step-function interpolation
         km_times = km_df_sorted["time_months"].values
         km_survival = km_df_sorted["survival"].values
         
         # Interpolate survival at each at-risk table timepoint
-        # This is more accurate than interpolating at-risk at KM points
+        # CRITICAL FIX: Use step-function (left-continuous) interpolation, not linear
+        # KM curves are step functions - survival stays constant until an event occurs
         result_rows = []
         
         for _, row in atrisk_df_copy.iterrows():
             t = row["time_months"]
             n_risk = row["n_risk"]
             
-            # Interpolate survival from KM curve at this timepoint
-            # Use the survival value JUST BEFORE or AT this time (left-continuous for survival)
-            survival = np.interp(t, km_times, km_survival)
+            # Check if this timepoint exactly matches a KM curve point
+            exact_match_idx = np.where(np.abs(km_times - t) < 1e-6)[0]
+            if len(exact_match_idx) > 0:
+                # Use exact KM value if timepoints match
+                survival = km_survival[exact_match_idx[0]]
+            else:
+                # Step-function interpolation: find the most recent KM point <= t
+                # This preserves the step-function nature of KM curves
+                mask = km_times <= t
+                if np.any(mask):
+                    # Use survival from the most recent timepoint <= t
+                    survival = km_survival[mask][-1]
+                else:
+                    # If t is before first KM point, use first survival value
+                    survival = km_survival[0] if len(km_survival) > 0 else 1.0
             
             result_rows.append({
                 "time_months": t,
@@ -471,7 +504,7 @@ class IPDBuilderAgent(BaseAgent):
                 df_cleaned.loc[idx, 'time_months'] += 0.001 * (idx - df_cleaned.index[0])
         
         # Convert back to KMPoint objects
-        from ..models.schemas import KMPoint
+        from ..models.schemas import KMPoint  # type: ignore
         cleaned_points = []
         for _, row in df_cleaned.iterrows():
             cleaned_points.append(KMPoint(

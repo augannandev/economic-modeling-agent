@@ -47,6 +47,7 @@ export interface SurvivalAnalysisState {
     chemo: any;
     pembro: any;
   };
+  data_source?: 'project' | 'demo' | 'local';  // Track where data came from
   km_curves?: {
     chemo: any;
     pembro: any;
@@ -151,9 +152,11 @@ async function checkPause(analysisId: string): Promise<void> {
  * Loads IPD from Supabase if project_id is set, otherwise from local/demo data
  */
 async function loadData(state: SurvivalAnalysisState): Promise<Partial<SurvivalAnalysisState>> {
-  const data = await loadPseudoIPD(state.endpointType, state.project_id);
+  const dataResult = await loadPseudoIPD(state.endpointType, state.project_id);
+  const { data_source, ...data } = dataResult;
   return {
     data,
+    data_source,
     workflow_state: 'DATA_LOADED',
     progress: 0,
   };
@@ -754,6 +757,39 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
     throw new Error('No models fitted');
   }
 
+  // Generate IPD KM plots if using demo data
+  let ipdKmPlot: string | undefined = undefined;
+  if (state.data_source === 'demo' && state.data) {
+    try {
+      const { getPythonServiceUrl } = await import('../lib/env');
+      const pythonServiceUrl = getPythonServiceUrl();
+      const response = await fetch(`${pythonServiceUrl}/plot-km-from-ipd`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chemo_time: state.data.chemo.time,
+          chemo_event: state.data.chemo.event,
+          pembro_time: state.data.pembro.time,
+          pembro_event: state.data.pembro.event,
+          endpoint_type: state.endpointType
+        }),
+      });
+
+      if (response.ok) {
+        const plotResult = await response.json() as { plot_base64?: string; p_value?: number };
+        if (plotResult.plot_base64) {
+          ipdKmPlot = plotResult.plot_base64;
+          console.log(`[Synthesis] Generated IPD KM plot for demo data`);
+        }
+      } else {
+        console.warn(`[Synthesis] Failed to generate IPD KM plot: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.warn(`[Synthesis] Error generating IPD KM plot: ${error}`);
+      // Don't fail synthesis if plot generation fails
+    }
+  }
+
   // Prepare assessment data for synthesis
   const assessmentData = state.fitted_models.map(model => ({
     model_id: model.model_id,
@@ -782,7 +818,16 @@ async function generateSynthesis(state: SurvivalAnalysisState): Promise<Partial<
     } : undefined,
   }));
 
-  const synthesis = await synthesizeCrossModel(assessmentData, state.ph_tests, state.cutpoint_results);
+  // Add IPD KM plot to diagnostic plots if available
+  const phTestsWithIpdPlot = state.ph_tests ? {
+    ...state.ph_tests,
+    diagnostic_plots: {
+      ...state.ph_tests.diagnostic_plots,
+      ipd_km_plot: ipdKmPlot
+    }
+  } : undefined;
+
+  const synthesis = await synthesizeCrossModel(assessmentData, phTestsWithIpdPlot, state.cutpoint_results);
 
   // Save synthesis report to database
   const db = await getDatabase(getDatabaseUrl()!);
