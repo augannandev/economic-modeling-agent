@@ -1,6 +1,6 @@
 import { loadParquetData } from '../services/python-service';
 import { getDataDirectory, getPythonServiceUrl } from '../lib/env';
-import { isSupabaseConfigured, getIPD } from '../lib/supabase';
+import { isSupabaseConfigured, getIPD, type IPDRecord } from '../lib/supabase';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync } from 'fs';
@@ -42,12 +42,16 @@ async function loadIPDFromSupabase(
       return null;
     }
 
-    // Transform Supabase records to the expected format
-    const transformRecords = (records: Array<{ time: number; event: boolean; arm: string }>) => ({
-      time: records.map(r => r.time),
-      event: records.map(r => r.event ? 1 : 0),
-      arm: records.map(r => r.arm),
-    });
+    // Transform Supabase IPDRecord to the expected format
+    // IPDRecord has nested ipd_data array with { patient_id, time, event, arm }
+    const transformRecords = (records: IPDRecord[]) => {
+      const allIPD = records.flatMap(r => r.ipd_data || []);
+      return {
+        time: allIPD.map(r => r.time),
+        event: allIPD.map(r => r.event),
+        arm: allIPD.map(r => r.arm),
+      };
+    };
 
     console.log(`[DataLoader] Loaded ${chemoRecords.length} chemo, ${pembroRecords.length} pembro records from Supabase`);
 
@@ -192,10 +196,17 @@ export async function loadPseudoIPD(
 
 /**
  * Simple CSV parser for IPD data
+ * Handles quoted and unquoted headers/values
  */
 function parseCSV(content: string): { time: number[]; event: number[]; arm: string[] } {
   const lines = content.trim().split('\n');
-  const header = lines[0].toLowerCase().split(',');
+  
+  // Parse header - handle quoted values
+  const headerLine = lines[0];
+  const header = headerLine.split(',').map(col => {
+    // Remove quotes and convert to lowercase
+    return col.trim().replace(/^"|"$/g, '').toLowerCase();
+  });
 
   const timeIdx = header.indexOf('time');
   const eventIdx = header.indexOf('event');
@@ -211,17 +222,46 @@ function parseCSV(content: string): { time: number[]; event: number[]; arm: stri
     arm: [] as string[],
   };
 
-  // Skip header
+  // Parse data rows - handle quoted values
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
-    const parts = line.split(',');
-    result.time.push(parseFloat(parts[timeIdx]));
-    result.event.push(parseFloat(parts[eventIdx])); // Ensure number
-    if (armIdx !== -1) {
-      // Remove quotes if present
-      result.arm.push(parts[armIdx].replace(/^"|"$/g, ''));
+    // Parse CSV line handling quoted values properly
+    // This regex handles: unquoted values, quoted values, and values with commas inside quotes
+    const parts: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let j = 0; j < line.length; j++) {
+      const char = line[j];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        parts.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    parts.push(current.trim()); // Add last part
+
+    // Remove quotes from values and parse
+    const cleanParts = parts.map(p => p.replace(/^"|"$/g, ''));
+    
+    const timeVal = parseFloat(cleanParts[timeIdx]);
+    const eventVal = parseFloat(cleanParts[eventIdx]);
+    
+    if (isNaN(timeVal) || isNaN(eventVal)) {
+      console.warn(`[DataLoader] Skipping invalid row ${i}: time=${cleanParts[timeIdx]}, event=${cleanParts[eventIdx]}`);
+      continue;
+    }
+    
+    result.time.push(timeVal);
+    result.event.push(eventVal);
+    
+    if (armIdx !== -1 && cleanParts[armIdx]) {
+      result.arm.push(cleanParts[armIdx]);
     } else {
       result.arm.push('unknown');
     }
