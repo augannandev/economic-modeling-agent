@@ -23,7 +23,7 @@ interface ArmStatistics {
 }
 
 interface IPDPreviewData {
-  source: 'digitizer' | 'demo';
+  source: 'digitizer' | 'demo' | 'project';
   endpoint: string;
   plot_base64: string;
   statistics: {
