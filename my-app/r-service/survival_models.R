@@ -540,6 +540,7 @@ plot_km_from_ipd <- function(req) {
       
       if (has_survminer) {
         library(survminer)
+        # survminer loads ggplot2, so theme_minimal is available
         p <- ggsurvplot(
           fit,
           data = all_data,
@@ -551,7 +552,7 @@ plot_km_from_ipd <- function(req) {
           ylab = "Overall Survival Probability",
           title = paste0("Kaplan-Meier Curves from Reconstructed IPD (", endpoint_type, ")"),
           palette = c("red", "blue"),
-          ggtheme = theme_minimal(),
+          ggtheme = ggplot2::theme_minimal(),  # nolint
           risk.table.height = 0.25,
           fontsize = 4
         )
