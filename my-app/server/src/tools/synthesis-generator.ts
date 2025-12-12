@@ -311,6 +311,7 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots
   log_cumulative_hazard?: string;
   cumulative_hazard?: string;
   schoenfeld?: string;
+  schoenfeld_residuals?: string;
   ipd_reconstruction?: {
     chemo?: string;  // base64 plot
     pembro?: string; // base64 plot
@@ -336,10 +337,11 @@ function generatePlotsSection(baseCaseModels: ModelAssessment[], diagnosticPlots
       plotsSection += `![Cumulative Hazard](data:image/png;base64,${diagnosticPlots.cumulative_hazard})\n\n`;
     }
 
-    if (diagnosticPlots.schoenfeld) {
+    const schoenfeldPlot = diagnosticPlots.schoenfeld || diagnosticPlots.schoenfeld_residuals;
+    if (schoenfeldPlot) {
       plotsSection += '### Schoenfeld Residuals Plot\n\n';
       plotsSection += '*Assessment of proportional hazards assumption over time.*\n\n';
-      plotsSection += `![Schoenfeld Residuals](data:image/png;base64,${diagnosticPlots.schoenfeld})\n\n`;
+      plotsSection += `![Schoenfeld Residuals](data:image/png;base64,${schoenfeldPlot})\n\n`;
     }
 
     // Add IPD reconstruction validation plots
