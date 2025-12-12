@@ -30,7 +30,8 @@ health_check <- function() {
   list(
     message = "R Survival Analysis Service",
     status = "running",
-    models = c("gompertz", "rp-spline", "schoenfeld", "refit-and-predict", "reconstruct-ipd", "plot-ipd-reconstruction", "plot-km-from-ipd")
+    models = c("parametric", "gompertz", "rp-spline", "schoenfeld", "refit-and-predict", "reconstruct-ipd", "plot-ipd-reconstruction", "plot-km-from-ipd"),
+    distributions = c("exponential", "weibull", "log-normal", "log-logistic", "gompertz", "generalized-gamma")
   )
 }
 
