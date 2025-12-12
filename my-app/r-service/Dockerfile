@@ -8,6 +8,12 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libxml2-dev \
     libsodium-dev \
+    libharfbuzz-dev \
+    libfribidi-dev \
+    libfreetype6-dev \
+    libpng-dev \
+    libtiff5-dev \
+    libjpeg-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
