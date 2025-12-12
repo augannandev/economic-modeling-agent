@@ -8,7 +8,7 @@ export interface VisionAssessmentResult {
   // Core scores
   short_term_score: number; // 0-10 (fit quality)
   long_term_score: number; // 0-10 (extrapolation plausibility)
-  
+
   // Period-based observations
   observations: {
     early: { // 0-6 months
@@ -32,7 +32,7 @@ export interface VisionAssessmentResult {
       concerns: string[];
     };
   };
-  
+
   // Extracted predictions from the extrapolation plot
   extracted_predictions: {
     year1?: number; // Survival proportion 0-1
@@ -42,7 +42,7 @@ export interface VisionAssessmentResult {
     year20?: number;
     median_survival_months?: number;
   };
-  
+
   // Benchmark comparison (if RAG context provided)
   benchmark_comparison: {
     year5_deviation_pct?: number; // % deviation from benchmark
@@ -50,7 +50,7 @@ export interface VisionAssessmentResult {
     plausibility_rating: 'plausible' | 'concern' | 'high_concern' | 'implausible';
     notes: string;
   };
-  
+
   // Approach-specific assessment
   approach_assessment: {
     distribution_appropriateness?: string; // One-piece
@@ -62,18 +62,18 @@ export interface VisionAssessmentResult {
     overfitting_risk?: string;
     extrapolation_stability?: string;
   };
-  
+
   // Red flags
   red_flags: string[];
-  
+
   // Summary
   strengths: string[];
   weaknesses: string[];
-  
+
   // Recommendation
   recommendation: 'Base Case' | 'Scenario' | 'Screen Out';
   recommendation_rationale: string;
-  
+
   // Token usage
   token_usage: {
     input: number;
@@ -193,11 +193,11 @@ Use these benchmarks to:
 - Calculate deviation percentages
 - Assess plausibility of extrapolation
 
-Deviation Thresholds:
-- <50% deviation: Plausible
-- 50-100% deviation: Concern
-- 100-200% deviation: High Concern
-- >200% deviation: Implausible
+Deviation Thresholds (Relative):
+- <20% deviation: Plausible
+- 20-50% deviation: Concern
+- 50-100% deviation: High Concern
+- >100% deviation: Implausible (Significantly wrong)
 ` : '';
 
   const approachGuidance = getApproachGuidance(modelMetadata.approach, modelMetadata);
@@ -362,7 +362,7 @@ RECOMMENDATION CRITERIA:
     const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
     const jsonStr = jsonMatch ? jsonMatch[1] : content;
     const parsed = JSON.parse(jsonStr);
-    
+
     // Ensure all required fields with defaults
     assessment = {
       short_term_score: parsed.short_term_score ?? 5,
@@ -391,7 +391,7 @@ RECOMMENDATION CRITERIA:
   }
 
   // Estimate token usage
-  const inputTokens = Math.ceil(prompt.length / 4) + 
+  const inputTokens = Math.ceil(prompt.length / 4) +
     Math.ceil(shortTermPlotBase64.length / 1000) * 85 + // ~85 tokens per 1KB base64
     Math.ceil(longTermPlotBase64.length / 1000) * 85;
   const outputTokens = Math.ceil(content.length / 4);
@@ -433,7 +433,7 @@ export function toLegacyFormat(result: VisionAssessmentResult): LegacyVisionResu
       result.observations.mid.fit_quality,
       result.observations.late.fit_quality
     ].filter(Boolean).join(' '),
-    long_term_observations: result.observations.extrapolation.trajectory + ' ' + 
+    long_term_observations: result.observations.extrapolation.trajectory + ' ' +
       result.observations.extrapolation.plausibility,
     strengths: result.strengths.join('; '),
     weaknesses: result.weaknesses.join('; '),

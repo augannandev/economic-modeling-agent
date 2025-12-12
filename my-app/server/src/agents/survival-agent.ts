@@ -1,5 +1,6 @@
 // LangGraph imports removed - using sequential workflow for now
 import { loadPseudoIPD } from '../tools/data-loader';
+import { EXTERNAL_BENCHMARKS } from '../lib/external-benchmarks';
 import { readFileSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { exec } from 'child_process';
@@ -488,7 +489,11 @@ async function fitPiecewiseModels(state: SurvivalAnalysisState): Promise<Partial
             aic: modelResult.aic,
             bic: modelResult.bic,
             cutpoint,
-          }
+          },
+          // Format benchmark context for Vision LLM
+          EXTERNAL_BENCHMARKS[arm as keyof typeof EXTERNAL_BENCHMARKS] ?
+            JSON.stringify(EXTERNAL_BENCHMARKS[arm as keyof typeof EXTERNAL_BENCHMARKS], null, 2) :
+            undefined
         );
 
         // Map vision assessment to database format
@@ -663,7 +668,11 @@ async function fitSplineModels(state: SurvivalAnalysisState): Promise<Partial<Su
               aic: modelResult.aic,
               bic: modelResult.bic,
               scale,
-            }
+            },
+            // Format benchmark context for Vision LLM
+            EXTERNAL_BENCHMARKS[arm as keyof typeof EXTERNAL_BENCHMARKS] ?
+              JSON.stringify(EXTERNAL_BENCHMARKS[arm as keyof typeof EXTERNAL_BENCHMARKS], null, 2) :
+              undefined
           );
 
           // Map vision assessment to database format

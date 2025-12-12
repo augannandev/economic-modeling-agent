@@ -1,4 +1,4 @@
-FROM rocker/r-ver:4.3.0
+FROM rocker/r-ver:4.4.0
 
 WORKDIR /app
 
@@ -66,14 +66,11 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
     if (!'base64enc' %in% rownames(installed.packages())) stop('base64enc installation failed'); \
     cat('✓ base64enc installed\n')"
 
-# Update Matrix package to system library (required >= 1.6.0 by MatrixModels)
-RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \
-    cat('Updating Matrix package to system library...\n'); \
-    install.packages('Matrix', lib=.Library, quiet=FALSE); \
-    v <- packageVersion('Matrix'); \
+# Verify Matrix version (R 4.4 ships with Matrix >= 1.6.0)
+RUN Rscript -e "v <- packageVersion('Matrix'); \
     cat('Matrix version:', as.character(v), '\n'); \
     stopifnot(v >= '1.6.0'); \
-    cat('✓ Matrix updated to', as.character(v), '\n')"
+    cat('✓ Matrix version OK\n')"
 
 # Install SparseM and quantreg (dependencies for survminer chain)
 RUN Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); \

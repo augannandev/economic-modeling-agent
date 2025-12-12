@@ -3,7 +3,24 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from survival_models import fit_one_piece_model
-from typing import Dict
+from typing import Dict, Optional
+
+# Safe imports for fitters
+try:
+    from lifelines import ExponentialFitter, WeibullFitter, LogNormalFitter, LogLogisticFitter
+except ImportError:
+    # Essential fitters missing, let it fail at module level or handle downstream
+    ExponentialFitter = None
+
+try:
+    from lifelines import GeneralizedGammaFitter
+except ImportError:
+    GeneralizedGammaFitter = None
+
+try:
+    from custom_gompertz import GompertzFitter
+except ImportError:
+    GompertzFitter = None
 
 def detect_cutpoint_chow_test(data: Dict, weeks_start: int = 12, weeks_end: int = 52) -> Dict:
     """
@@ -220,18 +237,23 @@ def fit_piecewise_model(data: Dict, arm: str, distribution: str, cutpoint: float
     # But fit_one_piece_model signature is fixed in the endpoint.
     
     # Let's import the Fitter classes and recalculate.
-    from lifelines import ExponentialFitter, WeibullFitter, LogNormalFitter, LogLogisticFitter, GeneralizedGammaFitter
-    from custom_gompertz import GompertzFitter
-    
+    # Fitters mapping
     fitters = {
         'exponential': ExponentialFitter,
         'weibull': WeibullFitter,
         'log-normal': LogNormalFitter,
-        'log-logistic': LogLogisticFitter,
-        'gompertz': GompertzFitter,
-        'generalized-gamma': GeneralizedGammaFitter
+        'log-logistic': LogLogisticFitter
     }
     
+    if GeneralizedGammaFitter:
+        fitters['generalized-gamma'] = GeneralizedGammaFitter
+        
+    if GompertzFitter:
+        fitters['gompertz'] = GompertzFitter
+    
+    if distribution not in fitters:
+        raise ValueError(f"Distribution '{distribution}' is not supported or available in this environment.")
+        
     Fitter = fitters[distribution]
     fitter = Fitter()
     
